@@ -87,6 +87,11 @@ public class RunJadeMAS extends RunLocalMAS {
     }
 
     public void create() throws JasonException {
+        // static type checking (see package jason.typecheck)
+        if (!jason.typecheck.StaticTypeCheck.check(project)) {
+            onTypeCheckFail();
+            return;
+        }
         if (startContainer()) {
             RuntimeServicesFactory.set( new JadeRuntimeServices(cc,null) );
             if (profile.getBooleanProperty(Profile.MAIN, true)) {

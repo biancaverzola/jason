@@ -1,0 +1,10 @@
+MAS mundo {
+    agents: robo;
+    types {
+        pos(number, number);
+        localizacao(atom, pos);
+        caminho(list(pos));
+        ligado(boolean);
+        nome(string);
+    }
+}

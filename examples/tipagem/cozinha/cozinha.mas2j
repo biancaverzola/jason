@@ -1,0 +1,9 @@
+MAS cozinha {
+    agents: cozinheiro; supervisor;
+    types {
+        temperatura(atom, number);
+        cozinhar(atom);
+        servir(atom);
+        ligar(atom);
+    }
+}

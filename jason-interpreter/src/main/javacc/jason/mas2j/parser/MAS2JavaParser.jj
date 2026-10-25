@@ -43,6 +43,17 @@ public class mas2j {
 
     MAS2JProject project;
 
+    /** adds a static type declaration (block "types { }", see jason.typecheck) */
+    void addTypeDecl(String decl, int line) throws ParseException {
+        try {
+            Literal l = ASSyntax.parseLiteral(decl);
+            l.setSrcInfo(new SourceInfo("mas2j", line));
+            project.addTypeDecl(l);
+        } catch (Exception e) {
+            throw new ParseException("invalid type declaration '" + decl + "' at line " + line);
+        }
+    }
+
 }
 
 PARSER_END(mas2j)
@@ -79,6 +90,7 @@ TOKEN : {
 |  <ASOV:        "verbose" >
 
 |  <DIRECTIVE:   "directives" >
+|  <TYPES:       "types" >
 
 |  <ASOSYNC:     "synchronised" >
 |  <ASOBOOL:     ("true" | "false" ) >
@@ -139,6 +151,8 @@ MAS2JProject mas() :           { Token soc; }
   control()
 
   agents()
+
+  types()
 
   directives()
 
@@ -341,6 +355,38 @@ void sourcepath() :         { Token cp; }
   ]
 }
 
+
+/* static type declarations, e.g.
+     types {
+         temperatura(atom, number);
+         caminho(list(pos));
+     }
+*/
+void types() :              { Token f; String a; String decl; }
+{
+  [ <TYPES> "{"
+    (
+      f = <ASID>            { decl = f.image; }
+      [ "(" a = typeArgs() ")"  { decl += "(" + a + ")"; } ]
+      ";"                   { addTypeDecl(decl, f.beginLine); }
+    )*
+    "}"
+  ]
+}
+
+String typeArgs() :         { String s; String r; }
+{
+  s = typeExpr()
+  ( "," r = typeExpr()      { s += "," + r; } )*
+                            { return s; }
+}
+
+String typeExpr() :         { Token t; String s; String a; }
+{
+  t = <ASID>                { s = t.image; }
+  [ "(" a = typeArgs() ")"  { s += "(" + a + ")"; } ]
+                            { return s; }
+}
 
 void directives() :         {  Token directiveId; ClassParameters directiveClass = null;  }
 {

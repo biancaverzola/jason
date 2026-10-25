@@ -34,6 +34,7 @@ public class MAS2JProject implements Serializable {
     private List<String> classpaths = new ArrayList<String>();
     private SourcePath aslSourcepaths = new SourcePath();
     private Map<String,String> directiveClasses = new HashMap<String,String>();
+    private List<jason.asSyntax.Literal> typeDecls = new ArrayList<>(); // static type declarations (block "types { }")
 
     public static MAS2JProject parse(String file) {
         try {
@@ -122,6 +123,14 @@ public class MAS2JProject implements Serializable {
 
     public List<AgentParameters> getAgents() {
         return agents;
+    }
+
+    /** adds a type declaration from the block "types { }" (see jason.typecheck) */
+    public void addTypeDecl(jason.asSyntax.Literal decl) {
+        typeDecls.add(decl);
+    }
+    public List<jason.asSyntax.Literal> getTypeDecls() {
+        return typeDecls;
     }
 
     public Set<File> getAllASFiles() {
@@ -223,6 +232,14 @@ public class MAS2JProject implements Serializable {
             s.append("\n");
         }
         s.append("\n");
+
+        // static type declarations
+        if (!typeDecls.isEmpty()) {
+            s.append("   types {\n");
+            for (jason.asSyntax.Literal t: typeDecls)
+                s.append("       "+t+";\n");
+            s.append("   }\n\n");
+        }
 
         // directives
         if (directiveClasses.size() > 0) {

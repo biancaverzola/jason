@@ -16,6 +16,7 @@ import jason.mas2j.AgentParameters;
 import jason.mas2j.ClassParameters;
 import jason.mas2j.MAS2JProject;
 import jason.mas2j.parser.ParseException;
+import jason.typecheck.StaticTypeCheck;
 import jason.runtime.*;
 import jason.util.Config;
 
@@ -188,6 +189,8 @@ public class RunLocalMAS extends BaseLocalMAS implements RunLocalMASMBean {
                 }
                 jason.mas2j.parser.mas2j parser = new jason.mas2j.parser.mas2j(inProject);
                 project = parser.mas();
+                if (!appFromClassPath)
+                    project.setProjectFile(new File(projectFileName)); // used in the messages of the type checker
             } else {
                 project = new MAS2JProject();
             }
@@ -329,9 +332,24 @@ public class RunLocalMAS extends BaseLocalMAS implements RunLocalMASMBean {
 
     /** create environment, agents, controller */
     public void create() throws JasonException {
+        // static type checking (see package jason.typecheck)
+        if (!StaticTypeCheck.check(project)) {
+            onTypeCheckFail();
+            return;
+        }
         createEnvironment();
         createAgs();
         createController();
+    }
+
+    /**
+     * called when the static type checking fails: the agents are not created.
+     * With the GUI console, it stays open so that the errors can be read;
+     * otherwise, the MAS finishes.
+     */
+    protected void onTypeCheckFail() {
+        if (!MASConsoleGUI.hasConsole())
+            finish(0, true, 1);
     }
 
     /** start agents, .... */

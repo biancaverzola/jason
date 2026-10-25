@@ -71,6 +71,7 @@ public class DirectiveProcessor {
         registerDirective("include", Include.class);
         registerDirective("register_function", FunctionRegister.class);
         registerDirective("namespace", NameSpace.class);
+        registerDirective(jason.typecheck.TypeDirective.NAME, jason.typecheck.TypeDirective.class); // static type declarations
 
         registerDirective("dg",  DG.class);
         registerDirective("bdg", BDG.class);
