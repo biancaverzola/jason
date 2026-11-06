@@ -194,9 +194,15 @@ task testJason(dependsOn: 'jar') {
     def errorOnTests = false
     outputs.upToDateWhen { false } // disable cache
 
-    //doFirst {
+    // read at configuration time: accessing the project at execution time is deprecated (it fails in Gradle 10)
+    def testWorkingDir = project.projectDir.absolutePath
+    def testClasspath  = sourceSets.main.runtimeClasspath
+    def execProviders  = providers
+    sourceSets.test.java.srcDirs += ['src/test/jason/jia']
+
+    doFirst {
         try {
-            providers.javaexec {
+            execProviders.javaexec {
                 //jvmArgs += '--enable-preview'
                 mainClass = 'jason.infra.local.RunLocalMAS'
                 //if (gradle.startParameter.logLevel.toString().equals("DEBUG")) {
@@ -206,9 +212,8 @@ task testJason(dependsOn: 'jar') {
                 //} else {
                 args = ['src/test/jason/unit_tests.mas2j', '--log-conf', 'src/main/resources/templates/console-lifecycle-logging.properties']
                 //}
-                workingDir project.projectDir.absolutePath
-                classpath sourceSets.main.runtimeClasspath
-                sourceSets.test.java.srcDirs += ['src/test/jason/jia']
+                workingDir testWorkingDir
+                classpath testClasspath
 
                 /*errorOutput = new ByteArrayOutputStream()
                 standardOutput = new ByteArrayOutputStream()
@@ -224,7 +229,7 @@ task testJason(dependsOn: 'jar') {
         //    errorOnTests = true
             throw new GradleException('Jason unit tests: ERROR! (see jason-interpreter/build/reports/tests/mas.log for details)')
         }
-    //}
+    }
 
     /*doLast {
         def styler = 'black red green yellow blue magenta cyan white'
