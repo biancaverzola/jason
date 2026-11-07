@@ -1,0 +1,22 @@
+// O exemplo "mensagens" DISTRIBUÍDO com JADE: cada agente num container diferente
+// (cada container é um processo Java separado; podem estar em computadores diferentes).
+//
+// Rodar em 3 terminais, nesta ordem (de dentro de examples/tipagem):
+//     ./rodar-jade.sh mensagens          container principal (sem agentes)
+//     ./rodar-jade.sh mensagens c2       container c2, com o agente b (quem recebe)
+//     ./rodar-jade.sh mensagens c1       container c1, com o agente a (quem envia)
+//
+// Os agentes são os mesmos da pasta ../mensagens.
+MAS mensagens_jade {
+    infrastructure: Jade(main_container_host("localhost"))
+    // para usar computadores diferentes, troque localhost pelo endereço do
+    // computador onde roda o container principal
+
+    agents:
+        a at "c1";
+        b at "c2";
+
+    types {
+        temperatura(atom, number);
+    }
+}

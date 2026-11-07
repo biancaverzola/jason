@@ -1,0 +1,7 @@
+// O exemplo "criar" com a infraestrutura JADE: .create_agent criando agentes no JADE.
+// Os agentes são os mesmos da pasta ../criar.
+MAS criar_jade {
+    infrastructure: Jade
+    agents: pai;
+    types { idade(number); }
+}

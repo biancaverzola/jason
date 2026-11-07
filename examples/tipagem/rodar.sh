@@ -17,9 +17,17 @@ AQUI=$(cd "$(dirname "$0")" && pwd)
 JASON=$(cd "$AQUI/../.." && pwd)
 JAR=$(ls "$JASON"/jason-cli/build/bin/jason-cli-all-*.jar 2>/dev/null | tail -1)
 
-if [ -z "$1" ] || [ ! -d "$AQUI/$1" ]; then
+# um exemplo é uma pasta com exatamente um .mas2j (deixa de fora gradle/ e jade/)
+exemplos() {
+    for d in "$AQUI"/*/; do
+        [ "$(ls "$d"*.mas2j 2>/dev/null | wc -l)" -eq 1 ] && basename "$d"
+    done
+}
+
+if [ -z "$1" ] || ! exemplos | grep -qx "$1"; then
     echo "uso: ./rodar.sh <exemplo> [opção=valor ...]"
-    echo "exemplos: $(cd "$AQUI" && ls -d */ | tr -d / | tr '\n' ' ')"
+    echo "exemplos: $(exemplos | tr '\n' ' ')"
+    echo "(para rodar com JADE, distribuído: ./rodar-jade.sh)"
     exit 1
 fi
 if [ -z "$JAR" ]; then

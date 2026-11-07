@@ -47,6 +47,7 @@ public class JadeRuntimeServices implements RuntimeServices {
 
     @Override
     public String createAgent(String agName, String agSource, String agClass, List<String> archClasses, ClassParameters bbPars, Settings stts, jason.asSemantics.Agent father) throws Exception {
+        jason.typecheck.StaticTypeCheck.checkCreatedAgent(agName, agSource); // static type checking of the new agent (see jason.typecheck)
         try {
             if (logger.isLoggable(Level.FINE)) {
                 logger.fine("Creating jade agent " + agName + "from source " + agSource + "(agClass=" + agClass + ", archClass=" + archClasses + ", settings=" + stts);

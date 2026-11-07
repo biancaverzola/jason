@@ -1,0 +1,12 @@
+// O exemplo "cozinha" rodando com a infraestrutura JADE (um container só).
+// Os agentes são os mesmos da pasta ../cozinha.
+MAS cozinha_jade {
+    infrastructure: Jade
+    agents: cozinheiro; supervisor;
+    types {
+        temperatura(atom, number);
+        cozinhar(atom);
+        servir(atom);
+        ligar(atom);
+    }
+}
