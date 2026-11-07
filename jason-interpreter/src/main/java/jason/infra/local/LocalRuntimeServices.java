@@ -69,6 +69,7 @@ public class LocalRuntimeServices extends BaseRuntimeServices {
             masRunner.getProject().getSourcePaths().addPath(SourcePath.CRPrefix);
 
         agSource = masRunner.getProject().getSourcePaths().fixPath(agSource);
+        jason.typecheck.StaticTypeCheck.checkCreatedAgent(agName, agSource); // static type checking of the new agent (see jason.typecheck)
 
         createLock.lock();
         try { // to avoid problems related to concurrent executions of .create_agent

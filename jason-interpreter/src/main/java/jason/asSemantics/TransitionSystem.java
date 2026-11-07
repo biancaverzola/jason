@@ -334,7 +334,7 @@ public class TransitionSystem implements Serializable {
                 }
 
                 // the message is not an ask answer
-            } else if (ag.socAcc(m)) {
+            } else if (jason.typecheck.RuntimeTypeCheck.acceptMessage(this, m, content) && ag.socAcc(m)) { // checks the types of the content (see jason.typecheck)
 
                 if (! m.isReplyToSyncAsk()) { // ignore answer after the timeout
                     // generate an event

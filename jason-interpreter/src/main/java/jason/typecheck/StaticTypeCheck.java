@@ -20,6 +20,7 @@ import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import jason.JasonException;
 import jason.asSemantics.Agent;
 import jason.asSyntax.Literal;
 import jason.asSyntax.SourceInfo;
@@ -29,7 +30,8 @@ import jason.runtime.SourcePath;
 
 /**
  * A etapa de verificação estática de tipos, chamada pelo RunLocalMAS antes de criar
- * o ambiente e os agentes.
+ * o ambiente e os agentes (e pelo LocalRuntimeServices quando um agente é criado
+ * com .create_agent durante a execução).
  *
  * Comportamento:
  *  - se não há nenhuma declaração de tipo (nem no .mas2j, nem nos .asl): não faz nada
@@ -37,15 +39,21 @@ import jason.runtime.SourcePath;
  *  - se há declarações: verifica todos os agentes e imprime
  *    "Verificação estática de tipos [OK]" ou "[FAIL]" com a lista de problemas;
  *  - se der [FAIL], por padrão o sistema não é iniciado.
+ * Além disso, registra as tabelas de tipos para a verificação em execução
+ * ({@link RuntimeTypeCheck}).
  *
  * Opções no logging.properties do projeto:
- *     jason.typecheck = false            desliga a verificação (mesmo havendo declarações)
- *     jason.typecheck.onfail = warn      em caso de [FAIL], só avisa e roda o sistema mesmo assim
- *     jason.typecheck.report = tipos.log também salva o relatório nesse arquivo
+ *     jason.typecheck = false              desliga toda a verificação de tipos (estática e em execução)
+ *     jason.typecheck.static = false       desliga só a verificação estática
+ *     jason.typecheck.onfail = stop        em caso de [FAIL], não inicia o sistema (padrão)
+ *     jason.typecheck.onfail = warn        em caso de [FAIL], só avisa e roda o sistema mesmo assim
+ *     jason.typecheck.report = tipos.log   também salva o relatório nesse arquivo
+ * (as opções da verificação em execução estão em RuntimeTypeCheck)
  */
 public class StaticTypeCheck {
 
     public static final String PROP_ENABLED = "jason.typecheck";
+    public static final String PROP_STATIC  = "jason.typecheck.static";
     public static final String PROP_ONFAIL  = "jason.typecheck.onfail";
     public static final String PROP_REPORT  = "jason.typecheck.report";
 
@@ -63,14 +71,32 @@ public class StaticTypeCheck {
     private static final Pattern TYPE_DIRECTIVE = Pattern.compile("\\{\\s*" + TypeDirective.NAME + "\\s*\\(");
     private static final Pattern INCLUDE        = Pattern.compile("include\\s*\\(\\s*\"([^\"]+)\"");
 
+    // caminhos dos fontes do projeto (usados para agentes criados durante a execução)
+    private static SourcePath projectPaths = new SourcePath();
+
     private StaticTypeCheck() {}
 
     /**
-     * Executa a verificação.
+     * Executa a verificação no início da execução.
      * @return true se o sistema pode ser iniciado; false se deve parar (houve [FAIL] e onfail não é warn)
      */
     public static boolean check(MAS2JProject project) {
-        if ("false".equalsIgnoreCase(property(PROP_ENABLED)))
+        try {
+            return doCheck(project);
+        } catch (RuntimeException e) {
+            internalError(e);
+            return true;
+        }
+    }
+
+    private static boolean doCheck(MAS2JProject project) {
+        RuntimeTypeCheck.clear();
+        projectPaths = project.getSourcePaths();
+
+        if (isOff(PROP_ENABLED))
+            return true;
+        boolean staticOn = !isOff(PROP_STATIC);
+        if (!staticOn && !RuntimeTypeCheck.isEnabled())
             return true;
 
         // Antes de fazer o parse dos agentes, uma busca rápida no texto: se nenhum arquivo
@@ -79,10 +105,114 @@ public class StaticTypeCheck {
         if (project.getTypeDecls().isEmpty() && !anyAgentMayHaveTypes(project))
             return true;
 
-        TypeCheckReport report = check(project, new TypeCheckReport());
-        if (report == null)
+        TypeCheckReport report = new TypeCheckReport();
+        Analysis a = analyse(project, report);
+        if (!a.anyDecl)
             return true; // havia "type(" no texto, mas nenhuma declaração de verdade (ex.: em comentário)
 
+        // as tabelas de tipos ficam guardadas para a verificação em execução (mensagens)
+        RuntimeTypeCheck.setGlobal(a.global);
+        a.merged.forEach(RuntimeTypeCheck::register);
+
+        if (!staticOn)
+            return true;
+
+        printReport(report);
+        if (!report.isOk() && stopOnFail()) {
+            logger.warning("O sistema não será iniciado por causa dos erros de tipo. "
+                    + "(Para rodar mesmo assim, use '" + PROP_ONFAIL + " = warn' no logging.properties.)");
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Verifica um agente criado durante a execução (.create_agent), antes de ele ser criado.
+     * Se o .asl já foi verificado no início (outro agente usa o mesmo arquivo), não faz nada.
+     * @throws JasonException se houver erros de tipo e onfail não for warn: o agente não é
+     *         criado e o .create_agent falha (o plano de quem chamou falha)
+     */
+    public static void checkCreatedAgent(String agName, String src) throws JasonException {
+        try {
+            doCheckCreatedAgent(agName, src);
+        } catch (RuntimeException e) {
+            internalError(e);
+        }
+    }
+
+    private static void doCheckCreatedAgent(String agName, String src) throws JasonException {
+        if (src == null || isOff(PROP_ENABLED) || RuntimeTypeCheck.isRegistered(src))
+            return;
+        boolean staticOn = !isOff(PROP_STATIC);
+        if (!staticOn && !RuntimeTypeCheck.isEnabled())
+            return;
+        TypeTable global = RuntimeTypeCheck.getGlobal();
+        if (global.isEmpty() && !mayHaveTypes(src, projectPaths, new HashSet<>()))
+            return;
+
+        TypeCheckReport report = new TypeCheckReport();
+        report.setSubject("agente " + agName + ", criado durante a execução");
+        Parsed p = parseAgent(ag -> ag.loadAS(src), report);
+        if (p.agent == null)
+            return; // erro de sintaxe: o próprio Jason mostra ao criar o agente
+        TypeTable merged = checkParsed(p, global, report);
+        if (merged.isEmpty() && report.isOk())
+            return;
+        RuntimeTypeCheck.register(src, merged);
+
+        if (!staticOn)
+            return;
+        printReport(report);
+        if (!report.isOk() && stopOnFail())
+            throw new JasonException("o agente " + agName + " não foi criado por causa dos erros de tipo");
+    }
+
+    /**
+     * Faz a verificação e retorna o relatório, sem imprimir nada.
+     * Retorna null se não existe nenhuma declaração de tipo.
+     * (Separado do método acima para poder ser usado pelos testes.)
+     */
+    public static TypeCheckReport check(MAS2JProject project, TypeCheckReport report) {
+        return analyse(project, report).anyDecl ? report : null;
+    }
+
+    /** resultado da análise do projeto: a tabela global, a tabela de cada .asl e se havia declarações */
+    private record Analysis(TypeTable global, Map<String, TypeTable> merged, boolean anyDecl) {}
+
+    private static Analysis analyse(MAS2JProject project, TypeCheckReport report) {
+        // 1. declarações globais (bloco types do .mas2j)
+        TypeTable global = globalTable(project, report);
+
+        // 2. parse de cada agente, coletando as declarações do .asl (e dos arquivos incluídos)
+        Map<String, Parsed> agents = new LinkedHashMap<>();
+        boolean anyDecl = !global.isEmpty() || !report.isOk();
+        for (AgentParameters ap : project.getAgents()) {
+            if (ap.getSource() == null)
+                continue;
+            String src = ap.getSource().toString();
+            if (agents.containsKey(src))
+                continue; // o mesmo .asl usado por vários agentes é verificado uma vez só
+
+            Parsed p = parseAgent(ag -> ag.loadAS(src), report);
+            if (p.agent == null)
+                continue; // erro de sintaxe: o próprio Jason vai mostrar o erro ao criar o agente
+            anyDecl = anyDecl || !p.decls.isEmpty() || !report.isOk();
+            agents.put(src, p);
+        }
+
+        Map<String, TypeTable> merged = new LinkedHashMap<>();
+        if (!anyDecl)
+            return new Analysis(global, merged, false);
+
+        // 3. verifica cada agente com a junção: .mas2j + sobrescritas do .asl
+        if (agents.isEmpty())
+            global.validate(report);
+        for (Map.Entry<String, Parsed> e : agents.entrySet())
+            merged.put(e.getKey(), checkParsed(e.getValue(), global, report));
+        return new Analysis(global, merged, true);
+    }
+
+    private static void printReport(TypeCheckReport report) {
         if (report.isOk())
             logger.info(report.format());
         else
@@ -96,50 +226,22 @@ public class StaticTypeCheck {
                 logger.warning("não foi possível salvar o relatório em " + reportFile + ": " + e.getMessage());
             }
         }
-
-        if (!report.isOk() && !"warn".equalsIgnoreCase(property(PROP_ONFAIL))) {
-            logger.warning("O sistema não será iniciado por causa dos erros de tipo. "
-                    + "(Para rodar mesmo assim, use '" + PROP_ONFAIL + " = warn' no logging.properties.)");
-            return false;
-        }
-        return true;
     }
 
     /**
-     * Faz a verificação e retorna o relatório, sem imprimir nada.
-     * Retorna null se não existe nenhuma declaração de tipo.
-     * (Separado do método acima para poder ser usado pelos testes.)
+     * Um erro dentro do próprio verificador nunca pode impedir o Jason de funcionar:
+     * avisa e segue sem a verificação.
      */
-    public static TypeCheckReport check(MAS2JProject project, TypeCheckReport report) {
-        // 1. declarações globais (bloco types do .mas2j)
-        TypeTable global = globalTable(project, report);
+    static void internalError(RuntimeException e) {
+        logger.log(Level.WARNING, "erro interno no verificador de tipos; a verificação foi ignorada neste ponto", e);
+    }
 
-        // 2. parse de cada agente, coletando as declarações do .asl (e dos arquivos incluídos)
-        Map<String, Parsed> agents = new LinkedHashMap<>();
-        boolean anyDecl = !global.isEmpty();
-        for (AgentParameters ap : project.getAgents()) {
-            if (ap.getSource() == null)
-                continue;
-            String src = ap.getSource().toString();
-            if (agents.containsKey(src))
-                continue; // o mesmo .asl usado por vários agentes é verificado uma vez só
+    private static boolean stopOnFail() {
+        return !"warn".equalsIgnoreCase(property(PROP_ONFAIL));
+    }
 
-            Parsed p = parseAgent(ag -> ag.loadAS(src), report);
-            if (p.agent == null)
-                continue; // erro de sintaxe: o próprio Jason vai mostrar o erro ao criar o agente
-            anyDecl = anyDecl || !p.decls.isEmpty();
-            agents.put(src, p);
-        }
-
-        if (!anyDecl && report.isOk())
-            return null;
-
-        // 3. verifica cada agente com a junção: .mas2j + sobrescritas do .asl
-        if (agents.isEmpty())
-            global.validate(report);
-        for (Parsed p : agents.values())
-            checkParsed(p, global, report);
-        return report;
+    private static boolean isOff(String prop) {
+        return "false".equalsIgnoreCase(property(prop));
     }
 
     /**
@@ -169,13 +271,15 @@ public class StaticTypeCheck {
         return global;
     }
 
-    private static void checkParsed(Parsed p, TypeTable global, TypeCheckReport report) {
+    /** verifica o agente e retorna a tabela usada (.mas2j + sobrescritas do .asl) */
+    private static TypeTable checkParsed(Parsed p, TypeTable global, TypeCheckReport report) {
         TypeTable agentTable = new TypeTable();
         for (TypeDecl d : p.decls)
             agentTable.add(d, report);
         TypeTable merged = TypeTable.merge(global, agentTable);
         merged.validate(report);
         new TypeChecker(merged, report).checkAgent(p.agent);
+        return merged;
     }
 
     /** resultado do parse de um agente: o código, as declarações de tipo encontradas e o erro (se houve) */
@@ -232,7 +336,7 @@ public class StaticTypeCheck {
         try {
             text = readText(src);
         } catch (Exception e) {
-            return true; // não deu para ler: na dúvida, faz a verificação completa
+            return false; // não deu para ler: o próprio Jason também não vai conseguir incluir esse arquivo
         }
         if (TYPE_DIRECTIVE.matcher(text).find())
             return true;

@@ -110,6 +110,21 @@ public class TypeChecker {
         }
     }
 
+    /**
+     * Confere um literal isolado, por exemplo o conteúdo de uma mensagem recebida
+     * durante a execução (ver {@link RuntimeTypeCheck}).
+     * @param where descrição de onde veio, para a mensagem (ex.: "mensagem tell de a")
+     */
+    public void checkContent(Literal l, String where) {
+        Ctx c = new Ctx(where, 0, show(l));
+        Scope s = new Scope();
+        TypeDecl d = table.get(l.getFunctor(), l.getArity());
+        for (int i = 0; i < l.getArity(); i++) {
+            Type expected = d != null ? d.getArgType(i) : Type.ANY;
+            checkTerm(l.getTerm(i), expected, s, c, d, "argumento " + (i + 1));
+        }
+    }
+
     private void checkPlan(Plan p) {
         Ctx c = ctxFor(p, null);
         Scope s = new Scope(); // cada plano tem as suas variáveis
@@ -144,7 +159,7 @@ public class TypeChecker {
         if (f instanceof LogExpr) {        // &, |, not
             LogExpr le = (LogExpr) f;
             checkFormula(le.getLHS(), s, parent);
-            if (le.getRHS() != null)
+            if (!le.isUnary())             // "not" só tem um lado
                 checkFormula(le.getRHS(), s, parent);
         } else if (f instanceof RelExpr) { // >, <, ==, =, ...
             checkRelExpr((RelExpr) f, s, ctxFor(f, parent));
@@ -275,7 +290,7 @@ public class TypeChecker {
 
     private void checkArith(ArithExpr e, Scope s, Ctx c) {
         checkNumericOperand(e.getLHS(), "operação " + show(e), s, c);
-        if (e.getRHS() != null)
+        if (!e.isUnary())                  // ex.: -X só tem um lado
             checkNumericOperand(e.getRHS(), "operação " + show(e), s, c);
     }
 

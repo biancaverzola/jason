@@ -178,6 +178,12 @@ public class TypeCheckTest extends TestCase {
         assertProblems(1, check(decls + "+!g <- for (idade(A)) { +nome(A) }."));
     }
 
+    public void testNotAndUnaryMinus() {
+        // "not" e o menos unário só têm um lado (não podem quebrar o verificador)
+        assertTrue(check("{ type(idade(number)) } +!g : not idade(_) & X = -3 <- Y = -X; +idade(Y).").isOk());
+        assertProblems(1, check("{ type(idade(number), nome(string)) } +!g : not idade(A) <- +nome(A)."));
+    }
+
     public void testRule() {
         String code = "{ type(idade(number), nome(string)) } velho(P) :- idade(I) & I > 60 & nome(I).";
         assertProblems(1, check(code));

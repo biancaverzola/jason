@@ -57,12 +57,18 @@ public class TypeCheckReport {
     }
 
     private final List<Problem> problems = new ArrayList<>();
+    private String subject = null; // ex.: "agente bob, criado durante a execução"
     private final Set<String>   seen     = new LinkedHashSet<>(); // evita repetir o mesmo problema
 
     public void addProblem(String location, String code, String message, String origin) {
         Problem p = new Problem(location, code, message, origin);
         if (seen.add(p.toString()))
             problems.add(p);
+    }
+
+    /** sobre o que é o relatório (aparece no título); null = o sistema inteiro */
+    public void setSubject(String subject) {
+        this.subject = subject;
     }
 
     public boolean isOk() {
@@ -75,10 +81,11 @@ public class TypeCheckReport {
 
     /** primeira linha: [OK] ou [FAIL] */
     public String getSummary() {
+        String title = subject == null ? TITLE : TITLE + " (" + subject + ")";
         if (isOk())
-            return TITLE + " [OK]";
+            return title + " [OK]";
         int n = problems.size();
-        return TITLE + " [FAIL] - " + n + (n == 1 ? " problema" : " problemas");
+        return title + " [FAIL] - " + n + (n == 1 ? " problema" : " problemas");
     }
 
     /** relatório completo */
