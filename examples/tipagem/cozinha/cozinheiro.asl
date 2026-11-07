@@ -8,5 +8,7 @@ temperatura(forno, "alta").
 // erro 3: T é string (pela sobrescrita), mas é comparado com um número
 +!cozinhar(X)
    : temperatura(forno, T) & T > 180
-  <- servir(X);
-     .stopMAS.
+  <- .print("forno a ", T, " graus: pronto para assar");
+     !servir(X).
+
++!servir(Prato) <- .print("servindo ", Prato).

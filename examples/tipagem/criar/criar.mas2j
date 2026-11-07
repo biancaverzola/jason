@@ -1,0 +1,4 @@
+MAS criar {
+  agents: pai;
+  types { idade(number); }
+}

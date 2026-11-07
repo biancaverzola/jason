@@ -14,7 +14,6 @@ longe(X) :- localizacao(robo, pos(X, _)) & X > 2.
      -+localizacao(robo, pos(N, Y));
      if (N > 3) { .print("longe ", N) } else { .print("perto") };
      for (.member(P, Resto)) { .print(P) };
-     !mover(N);
-     .stopMAS.
+     !mover(N).
 
 +!mover(D) <- .print("movendo ", D).

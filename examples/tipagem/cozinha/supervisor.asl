@@ -6,4 +6,6 @@ temperatura(forno, "duzentos").
 // erro 2: T é number (vem de temperatura/2), mas ligar espera atom
 +!verificar
    : temperatura(forno, T)
-  <- ligar(T).
+  <- !ligar(T).
+
++!ligar(Aparelho) <- .print("ligando ", Aparelho).

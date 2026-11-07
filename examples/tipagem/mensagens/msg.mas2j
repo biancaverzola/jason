@@ -1,0 +1,6 @@
+MAS msg {
+    agents: a; b;
+    types {
+        temperatura(atom, number);
+    }
+}
