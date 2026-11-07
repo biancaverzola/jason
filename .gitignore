@@ -63,3 +63,6 @@ doc/doc.html
 doc.html
 /doc
 *.gradle
+# exceção: o projeto Gradle dos exemplos de tipagem (TCC)
+!examples/tipagem/build.gradle
+!examples/tipagem/settings.gradle

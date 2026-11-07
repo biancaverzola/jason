@@ -1,0 +1,3 @@
+// Exemplos da verificação de tipos. Cada pasta é um sistema Jason.
+rootProject.name = 'tipagem'
+include 'cozinha', 'robo', 'erros', 'mensagens', 'criar'

@@ -1,0 +1,49 @@
+/*
+   Roda os exemplos com o Jason DESTE repositório (o que tem o verificador de tipos),
+   e não com o Jason oficial baixado da internet.
+
+   Dentro da pasta de um exemplo:
+       ../gradlew run                 com a janela do Jason (usa o logging.properties da pasta)
+       ../gradlew run -Pterminal      com a saída no terminal (usa as opções do logging.properties da pasta)
+
+   Ou daqui (examples/tipagem):
+       ./gradlew cozinha:run
+       ./gradlew cozinha:run -Pterminal
+
+   Antes, o Jason precisa estar compilado: ./gradlew na pasta raiz do repositório.
+*/
+
+def jasonDir = file('../..')
+def jasonJar = fileTree(dir: "${jasonDir}/jason-cli/build/bin", include: 'jason-cli-all-*.jar')
+def consoleLog = "${jasonDir}/jason-interpreter/src/main/resources/templates/console-info-logging.properties"
+
+subprojects {
+    task run(type: JavaExec) {
+        group = 'Jason'
+        description = 'roda este sistema Jason'
+        mainClass = 'jason.infra.local.RunLocalMAS'
+        classpath = jasonJar
+        workingDir = projectDir
+        standardInput = System.in
+        ignoreExitValue = true   // [FAIL] da verificação não é erro do Gradle
+        args = [ fileTree(dir: projectDir, include: '*.mas2j').singleFile.name ]
+
+        def logFile  = file('logging.properties')
+        def terminal = project.hasProperty('terminal')
+
+        doFirst {
+            if (jasonJar.isEmpty())
+                throw new GradleException("O Jason não está compilado: rode ./gradlew na pasta ${jasonDir.canonicalPath}")
+
+            if (terminal) {
+                // usa o logging.properties da pasta (com as opções que estiverem ligadas),
+                // trocando só a janela pelo terminal
+                def text = logFile.exists() ? logFile.getText('UTF-8') : new File(consoleLog).getText('UTF-8')
+                def tmp = File.createTempFile('jason-log', '.properties')
+                tmp.deleteOnExit()
+                tmp.write(text.replaceAll(/(?m)^handlers\s*=.*$/, 'handlers = java.util.logging.ConsoleHandler'), 'UTF-8')
+                args '--log-conf', tmp.absolutePath, '--no-net'
+            }
+        }
+    }
+}
