@@ -23,11 +23,27 @@ public class TypeTable {
     /** predicados cuja declaração do .asl substituiu a do .mas2j */
     private final Set<PredicateIndicator> overridden = new HashSet<>();
 
+    /** tipos enumerados, ex.: cor -> cor = [amarela, azul] */
+    private final Map<String, TypeDecl> enums = new LinkedHashMap<>();
+
+    /** tipos enumerados cuja declaração do .asl substituiu a do .mas2j */
+    private final Set<String> overriddenEnums = new HashSet<>();
+
     /**
      * Adiciona uma declaração. Se o mesmo predicado já foi declarado nesta tabela
      * com outros tipos, registra um problema no relatório.
      */
     public void add(TypeDecl d, TypeCheckReport report) {
+        if (d.isEnum()) {
+            TypeDecl old = enums.get(d.getFunctor());
+            if (old == null)
+                enums.put(d.getFunctor(), d);
+            else if (!old.getEnumValues().equals(d.getEnumValues()))
+                report.addProblem(d.getLocation(), "{ type(" + d + ") }",
+                        "declaração duplicada do tipo enumerado " + d.getFunctor() + " com valores diferentes; já declarado como "
+                                + old + " em " + old.getLocation(), null);
+            return;
+        }
         PredicateIndicator pi = d.getPI();
         TypeDecl old = decls.get(pi);
         if (old == null) {
@@ -46,6 +62,12 @@ public class TypeTable {
      */
     public static TypeTable merge(TypeTable global, TypeTable agent) {
         TypeTable t = new TypeTable();
+        t.enums.putAll(global.enums);
+        for (TypeDecl e : agent.enums.values()) {
+            if (t.enums.containsKey(e.getFunctor()))
+                t.overriddenEnums.add(e.getFunctor());
+            t.enums.put(e.getFunctor(), e);
+        }
         t.decls.putAll(global.decls);
         for (TypeDecl d : agent.decls.values()) {
             if (t.decls.containsKey(d.getPI()))
@@ -60,7 +82,21 @@ public class TypeTable {
     }
 
     public boolean isEmpty() {
-        return decls.isEmpty();
+        return decls.isEmpty() && enums.isEmpty();
+    }
+
+    /**
+     * Troca os nomes de tipos enumerados pelo tipo completo (com os valores aceitos).
+     * Ex.: em mochila(cor), o tipo "cor" é lido como um nome; aqui vira cor = [amarela, azul].
+     */
+    public Type resolve(Type t) {
+        if (t.isStruct() && enums.containsKey(t.getStructName()))
+            return enums.get(t.getStructName()).getEnumType();
+        if (t.isList() && t.getElemType() != null) {
+            Type e = resolve(t.getElemType());
+            return e == t.getElemType() ? t : Type.listOf(e);
+        }
+        return t;
     }
 
     public Collection<TypeDecl> getAll() {
@@ -93,12 +129,18 @@ public class TypeTable {
      * Ex.: em localizacao(atom, pos), "pos" precisa estar declarado.
      */
     public void validate(TypeCheckReport report) {
+        for (TypeDecl e : enums.values()) {
+            if (hasFunctor(e.getFunctor()))
+                report.addProblem(e.getLocation(), "{ type(" + e + ") }",
+                        "o nome '" + e.getFunctor() + "' foi declarado como tipo enumerado e como predicado; use nomes diferentes",
+                        null);
+        }
         for (TypeDecl d : decls.values()) {
             for (Type t : d.getArgTypes()) {
                 String unknown = unknownName(t);
                 if (unknown != null) {
                     report.addProblem(d.getLocation(), "{ type(" + d + ") }",
-                            "tipo desconhecido '" + unknown + "' (use atom, number, string, boolean, list, list(T), any ou o nome de um predicado declarado)",
+                            "tipo desconhecido '" + unknown + "' (use atom, number, string, boolean, list, list(T), any, o nome de um predicado declarado ou de um tipo enumerado)",
                             null);
                 }
             }
@@ -106,7 +148,7 @@ public class TypeTable {
     }
 
     private String unknownName(Type t) {
-        if (t.isStruct() && !hasFunctor(t.getStructName()))
+        if (t.isStruct() && !hasFunctor(t.getStructName()) && !enums.containsKey(t.getStructName()))
             return t.getStructName();
         if (t.isList() && t.getElemType() != null)
             return unknownName(t.getElemType());

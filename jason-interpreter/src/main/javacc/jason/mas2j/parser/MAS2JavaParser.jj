@@ -46,7 +46,8 @@ public class mas2j {
     /** adds a static type declaration (block "types { }", see jason.typecheck) */
     void addTypeDecl(String decl, int line) throws ParseException {
         try {
-            Literal l = ASSyntax.parseLiteral(decl);
+            // "cor = [amarela, azul]" (tipo enumerado) é uma fórmula; o resto é um literal
+            Literal l = decl.contains("=") ? (Literal) ASSyntax.parseFormula(decl) : ASSyntax.parseLiteral(decl);
             l.setSrcInfo(new SourceInfo("mas2j", line));
             project.addTypeDecl(l);
         } catch (Exception e) {
@@ -360,14 +361,19 @@ void sourcepath() :         { Token cp; }
      types {
          temperatura(atom, number);
          caminho(list(pos));
+         cor = [amarela, azul, vermelha];      // tipo enumerado
      }
 */
-void types() :              { Token f; String a; String decl; }
+void types() :              { Token f; Token v; String a; String decl; String vals; }
 {
   [ <TYPES> "{"
     (
       f = <ASID>            { decl = f.image; }
-      [ "(" a = typeArgs() ")"  { decl += "(" + a + ")"; } ]
+      [ "(" a = typeArgs() ")"  { decl += "(" + a + ")"; }
+      | "=" "[" v = <ASID>  { vals = v.image; }
+            ( "," v = <ASID> { vals += "," + v.image; } )*
+        "]"                 { decl += " = [" + vals + "]"; }
+      ]
       ";"                   { addTypeDecl(decl, f.beginLine); }
     )*
     "}"

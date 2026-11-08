@@ -73,10 +73,11 @@ public class TypeChecker {
     private static class VarInfo {
         Type   type;
         String origin; // ex.: "temperatura/2, linha 18"
-        // a lista escrita no código que a variável recebeu (ex.: L = [1, "a"]), guardada para
-        // conferir os elementos quando a variável for usada onde se espera list(T)
-        ListTerm list;
-        String   listOrigin;
+        // o valor escrito no código que a variável recebeu, guardado para conferir depois:
+        //  - uma lista (ex.: L = [1, "a"]): conferida quando L for usada onde se espera list(T)
+        //  - um átomo  (ex.: C = vermelho): conferido quando C for usada onde se espera um tipo enumerado
+        Term   value;
+        String valueOrigin;
         VarInfo(Type type, String origin) {
             this.type   = type;
             this.origin = origin;
@@ -124,7 +125,7 @@ public class TypeChecker {
         Scope s = new Scope();
         TypeDecl d = table.get(l.getFunctor(), l.getArity());
         for (int i = 0; i < l.getArity(); i++) {
-            Type expected = d != null ? d.getArgType(i) : Type.ANY;
+            Type expected = d != null ? table.resolve(d.getArgType(i)) : Type.ANY;
             checkTerm(l.getTerm(i), expected, s, c, d, "argumento " + (i + 1));
         }
     }
@@ -186,7 +187,7 @@ public class TypeChecker {
         Ctx c = ctxFor(l, parent);
         TypeDecl d = table.get(l.getFunctor(), l.getArity());
         for (int i = 0; i < l.getArity(); i++) {
-            Type expected = d != null ? d.getArgType(i) : Type.ANY;
+            Type expected = d != null ? table.resolve(d.getArgType(i)) : Type.ANY;
             checkTerm(l.getTerm(i), expected, s, c, d, "argumento " + (i + 1));
         }
     }
@@ -255,6 +256,11 @@ public class TypeChecker {
     }
 
     private void checkAtom(Literal atom, Type expected, Ctx c, TypeDecl d, String pos) {
+        if (expected.isEnum()) {           // ex.: cor = [amarela, azul]: o átomo precisa ser um deles
+            if (!expected.getEnumValues().contains(atom.getFunctor()))
+                problem(c, pos + ": esperado " + expected.describeEnum() + ", encontrado " + atom, d);
+            return;
+        }
         if (expected.isStruct() && atom.getFunctor().equals(expected.getStructName()) && table.has(atom.getFunctor(), 0))
             return; // ex.: tipo "vazio" declarado como vazio
         expect(expected, isBoolean(atom) ? Type.BOOLEAN : Type.ATOM, atom, c, d, pos);
@@ -341,6 +347,14 @@ public class TypeChecker {
                     bindList((VarTerm) rhs, (ListTerm) lhs, s, c, where);
                     break;
                 }
+                if (isNamedVar(lhs) && TypeDirective.isPlainAtom(rhs)) {   // ex.: C = vermelho, C == azul
+                    bindAtom((VarTerm) lhs, (Literal) rhs, s, c, where);
+                    break;
+                }
+                if (isNamedVar(rhs) && TypeDirective.isPlainAtom(lhs)) {   // ex.: azul == C
+                    bindAtom((VarTerm) rhs, (Literal) lhs, s, c, where);
+                    break;
+                }
                 Type tl = typeOf(lhs, s);
                 Type tr = typeOf(rhs, s);
                 if (lhs.isVar() && !lhs.isUnnamedVar() && !tr.isAny()) {
@@ -378,8 +392,30 @@ public class TypeChecker {
         constrainVar(v, Type.LIST, s, c, where, origin, null);
         info = s.vars.get(name);
         if (info.type.isList() && info.type.getElemType() == null) {
-            info.list       = lt;
-            info.listOrigin = origin;
+            info.value       = lt;
+            info.valueOrigin = origin;
+        }
+    }
+
+    /**
+     * A variável v recebe (ou é comparada com) o átomo a (ex.: C = vermelho, C == azul).
+     * Se v já é de um tipo enumerado, o átomo é conferido agora. Senão, v passa a ser um
+     * átomo e o átomo é guardado, para conferir quando v for usada onde se espera um tipo
+     * enumerado (ver constrainVar).
+     */
+    private void bindAtom(VarTerm v, Literal a, Scope s, Ctx c, String where) {
+        String name = v.getFunctor();
+        VarInfo info = s.vars.get(name);
+        if (info != null && info.type.isEnum()) {
+            checkAtom(a, info.type, c, null, where + " (" + name + " vem de " + info.origin + ")");
+            return;
+        }
+        String origin = where + ", linha " + c.line;
+        constrainVar(v, isBoolean(a) ? Type.BOOLEAN : Type.ATOM, s, c, where, origin, null);
+        info = s.vars.get(name);
+        if (info.type.getKind() == Type.Kind.ATOM || info.type.getKind() == Type.Kind.BOOLEAN) {
+            info.value       = a;
+            info.valueOrigin = origin;
         }
     }
 
@@ -411,11 +447,16 @@ public class TypeChecker {
         if (info == null) {
             s.vars.put(name, new VarInfo(t, origin));
         } else if (Type.compatible(info.type, t)) {
-            if (info.list != null && t.isList() && t.getElemType() != null) {
+            if (info.value != null && info.value.isList() && t.isList() && t.getElemType() != null) {
                 // ex.: L = [1, "a"]; +notas(L): confere os elementos da lista que L recebeu
-                ListTerm lt = info.list;
-                info.list = null;
-                checkList(lt, t, s, c, d, pos + " (" + name + " vem de " + info.listOrigin + ")");
+                ListTerm lt = (ListTerm) info.value;
+                info.value = null;
+                checkList(lt, t, s, c, d, pos + " (" + name + " vem de " + info.valueOrigin + ")");
+            } else if (info.value != null && !info.value.isList() && t.isEnum()) {
+                // ex.: C = vermelho; +mochila(C): confere o átomo que C recebeu
+                Literal a = (Literal) info.value;
+                info.value = null;
+                checkAtom(a, t, c, d, pos + " (" + name + " vem de " + info.valueOrigin + ")");
             }
             if (info.type.isAny())
                 info.origin = origin;

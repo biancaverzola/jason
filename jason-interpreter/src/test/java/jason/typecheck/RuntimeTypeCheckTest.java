@@ -14,6 +14,8 @@ public class RuntimeTypeCheckTest extends TestCase {
         table = new TypeTable();
         for (String d : new String[] { "temperatura(atom, number)", "pos(number, number)", "localizacao(atom, pos)" })
             table.add(TypeDirective.parseDecl(ASSyntax.parseLiteral(d), "t.mas2j", 1, true, r), r);
+        table.add(TypeDirective.parseDecl(ASSyntax.parseFormula("cor = [amarela, azul]"), "t.mas2j", 1, true, r), r);
+        table.add(TypeDirective.parseDecl(ASSyntax.parseLiteral("mochila(cor)"), "t.mas2j", 1, true, r), r);
         assertTrue(r.isOk());
     }
 
@@ -46,6 +48,13 @@ public class RuntimeTypeCheckTest extends TestCase {
     public void testVariablesAreAccepted() throws Exception {
         // ex.: conteúdo de um askOne: temperatura(forno, X)
         assertTrue(check("temperatura(forno, X)").isOk());
+    }
+
+    public void testEnum() throws Exception {
+        assertTrue(check("mochila(azul)").isOk());
+        TypeCheckReport r = check("mochila(vermelho)");
+        assertEquals(1, r.getProblems().size());
+        assertTrue(r.getProblems().get(0).getMessage().contains("esperado cor (amarela, azul), encontrado vermelho"));
     }
 
     public void testUndeclaredIsNotChecked() throws Exception {

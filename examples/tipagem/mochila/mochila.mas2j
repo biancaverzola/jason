@@ -1,0 +1,11 @@
+// Exemplo de tipo enumerado: cor só aceita os átomos listados.
+// Pega erros de digitação como "vermelho" no lugar de "vermelha".
+MAS mochila {
+    agents: aluno;
+
+    types {
+        cor = [amarela, azul, branca, verde, vermelha];
+        mochila(cor);
+        levar(cor);
+    }
+}

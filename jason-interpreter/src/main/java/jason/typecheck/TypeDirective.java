@@ -5,7 +5,9 @@ import java.util.List;
 
 import jason.asSemantics.Agent;
 import jason.asSyntax.Literal;
+import jason.asSyntax.ListTerm;
 import jason.asSyntax.Pred;
+import jason.asSyntax.RelExpr;
 import jason.asSyntax.SourceInfo;
 import jason.asSyntax.Term;
 import jason.asSyntax.directives.DefaultDirective;
@@ -15,6 +17,7 @@ import jason.asSyntax.directives.DefaultDirective;
  *
  *     { type(temperatura(atom, number)) }
  *     { type(pos(number, number), localizacao(atom, pos)) }   // várias de uma vez
+ *     { type(cor = [amarela, azul, vermelha]) }               // tipo enumerado
  *
  * Durante a execução normal do Jason a diretiva não faz nada (é ignorada).
  * Só quando o verificador está lendo os .asl (ver {@link StaticTypeCheck}) é que as
@@ -79,6 +82,8 @@ public class TypeDirective extends DefaultDirective {
      */
     public static TypeDecl parseDecl(Term t, String file, int line, boolean fromMas2j, TypeCheckReport report) {
         String loc = TypeCheckReport.shortFile(file) + ":" + line;
+        if (t instanceof RelExpr)
+            return parseEnumDecl((RelExpr) t, file, line, fromMas2j, report);
         if (!t.isLiteral() || t.isVar() || ((Literal) t).negated()) {
             report.addProblem(loc, t.toString(), "declaração de tipo inválida, use a forma nome(tipo1, tipo2, ...)", null);
             return null;
@@ -95,5 +100,44 @@ public class TypeDirective extends DefaultDirective {
             args.add(at);
         }
         return new TypeDecl(l.getFunctor(), args, file, line, fromMas2j);
+    }
+
+    private static final String ENUM_FORM = "tipo enumerado inválido, use a forma nome = [valor1, valor2, ...], com átomos, ex.: cor = [amarela, azul]";
+
+    /** cor = [amarela, azul, vermelha] */
+    private static TypeDecl parseEnumDecl(RelExpr r, String file, int line, boolean fromMas2j, TypeCheckReport report) {
+        String loc  = TypeCheckReport.shortFile(file) + ":" + line;
+        String code = r.getLHS() + " = " + r.getRHS();
+        Term name = r.getLHS();
+        Term vals = r.getRHS();
+        boolean ok = r.getOp() == RelExpr.RelationalOp.unify
+                && isPlainAtom(name)
+                && Type.fromTerm(name) != null && Type.fromTerm(name).isStruct()  // não pode ser number, atom, ...
+                && vals.isList() && !((ListTerm) vals).isEmpty();
+        List<String> values = new ArrayList<>();
+        if (ok) {
+            ListTerm lt = (ListTerm) vals;
+            if (lt.getTail() != null)   // [a|T]
+                ok = false;
+            for (Term v : lt.getAsList()) {
+                if (!isPlainAtom(v)) { ok = false; break; }
+                String a = ((Literal) v).getFunctor();
+                if (!values.contains(a))
+                    values.add(a);
+            }
+        }
+        if (!ok) {
+            report.addProblem(loc, code, ENUM_FORM, null);
+            return null;
+        }
+        return new TypeDecl(((Literal) name).getFunctor(), values, file, line, fromMas2j, true);
+    }
+
+    /** um átomo simples, ex.: amarela (não variável, número, string ou estrutura) */
+    static boolean isPlainAtom(Term t) {
+        if (t == null || t.isVar() || !t.isLiteral() || t.isList() || t.isArithExpr() || t instanceof RelExpr)
+            return false;
+        Literal l = (Literal) t;
+        return l.getArity() == 0 && !l.negated() && !l.hasAnnot();
     }
 }

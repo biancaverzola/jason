@@ -99,6 +99,59 @@ public class TypeCheckTest extends TestCase {
         assertHasProblem("elemento 2: esperado pos, encontrado atom", check(decls + "caminho([pos(1,2), forno])."));
     }
 
+    // ---- tipos enumerados: cor = [amarela, azul, ...] -----------------------
+
+    private static final String COR = "{ type(cor = [amarela, azul, vermelha], mochila(cor), levar(cor)) } ";
+
+    public void testEnumValues() {
+        assertTrue(check(COR + "mochila(amarela). mochila(vermelha). !levar(azul).").isOk());
+        TypeCheckReport r = check(COR + "mochila(vermelho).");
+        assertProblems(1, r);
+        assertHasProblem("argumento 1: esperado cor (amarela, azul, vermelha), encontrado vermelho", r);
+        assertProblems(1, check(COR + "!levar(verde)."));
+        assertProblems(1, check(COR + "+!x <- +mochila(vermelho)."));
+        assertProblems(1, check(COR + "+!x : mochila(vermelho) <- true."));
+        // outros tipos de valor também não servem
+        assertHasProblem("esperado cor, encontrado number", check(COR + "mochila(3)."));
+        assertHasProblem("esperado cor, encontrado string", check(COR + "mochila(\"azul\")."));
+    }
+
+    public void testEnumVariables() {
+        // C vem de mochila(C): é cor
+        assertTrue(check(COR + "+!x : mochila(C) <- !levar(C).").isOk());
+        assertTrue(check(COR + "+!x : mochila(C) & C == azul <- true.").isOk());
+        assertHasProblem("encontrado vermelho", check(COR + "+!x : mochila(C) & C == vermelho <- true."));
+        // o átomo passa por uma variável antes
+        assertTrue(check(COR + "+!x <- C = azul; +mochila(C).").isOk());
+        assertHasProblem("encontrado vermelho", check(COR + "+!x <- C = vermelho; +mochila(C)."));
+        // cor é um átomo: pode ser usada onde se espera atom
+        assertTrue(check(COR + "{ type(nome(atom)) } +!x : mochila(C) <- +nome(C).").isOk());
+        // mas não onde se espera number
+        assertProblems(1, check(COR + "{ type(idade(number)) } +!x : mochila(C) <- +idade(C)."));
+    }
+
+    public void testEnumInList() {
+        String decls = "{ type(cor = [amarela, azul], cores(list(cor))) } ";
+        assertTrue(check(decls + "cores([amarela, azul]).").isOk());
+        assertHasProblem("elemento 2: esperado cor (amarela, azul), encontrado roxo", check(decls + "cores([azul, roxo])."));
+    }
+
+    public void testEnumInMas2j() throws Exception {
+        String mas = "MAS m { agents: a; types { cor = [amarela, azul]; mochila(cor); } }";
+        assertTrue(check(mas, "mochila(azul).").isOk());
+        assertHasProblem("tipo declarado em: mas2j:1", check(mas, "mochila(roxo)."));
+        // sobrescrita no .asl
+        assertTrue(check(mas, "{ type(cor = [roxo]) } mochila(roxo).").isOk());
+    }
+
+    public void testInvalidEnumDeclarations() {
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [amarela, 3]) }"));
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = []) }"));
+        assertHasProblem("tipo enumerado inválido", check("{ type(number = [a]) }"));
+        assertHasProblem("declaração duplicada", check("{ type(cor = [a]) } { type(cor = [b]) }"));
+        assertHasProblem("tipo enumerado e como predicado", check("{ type(cor = [a], cor(atom)) }"));
+    }
+
     public void testListThroughVariable() {
         // a lista passa por uma variável antes de ser usada: os elementos continuam sendo conferidos
         String decls = "{ type(notas(list(number))) } ";

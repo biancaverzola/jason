@@ -236,8 +236,12 @@ public class MAS2JProject implements Serializable {
         // static type declarations
         if (!typeDecls.isEmpty()) {
             s.append("   types {\n");
-            for (jason.asSyntax.Literal t: typeDecls)
-                s.append("       "+t+";\n");
+            for (jason.asSyntax.Literal t: typeDecls) {
+                if (t instanceof jason.asSyntax.RelExpr r) // tipo enumerado: cor = [amarela, azul]
+                    s.append("       "+r.getLHS()+" = "+r.getRHS()+";\n");
+                else
+                    s.append("       "+t+";\n");
+            }
             s.append("   }\n\n");
         }
 
