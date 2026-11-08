@@ -42,8 +42,8 @@ import jason.util.Config;
  * de QUEM RECEBE (.mas2j + sobrescritas do .asl do agente que recebe).
  *
  * O que fazer quando o tipo está errado é definido no logging.properties:
- *     jason.typecheck.runtime.onfail = reject   descarta a mensagem e avisa (padrão)
- *     jason.typecheck.runtime.onfail = warn     aceita a mensagem e avisa
+ *     jason.typecheck.runtime.onfail = warn     aceita a mensagem e avisa (padrão, desde 08/11)
+ *     jason.typecheck.runtime.onfail = reject   descarta a mensagem e avisa
  *     jason.typecheck.runtime.onfail = fail     descarta a mensagem, avisa e gera no agente
  *                                               o evento de falha
  *                                               -!kqml_received(Remetente, Tipo, Conteudo, Id)[error(type_error), error_msg("...")]
@@ -129,11 +129,11 @@ public class RuntimeTypeCheck {
         String v = property(PROP_ONFAIL);
         if (v != null) {
             switch (v.trim().toLowerCase()) {
-                case "warn": return OnFail.WARN;
-                case "fail": return OnFail.FAIL;
+                case "reject": return OnFail.REJECT;
+                case "fail":   return OnFail.FAIL;
             }
         }
-        return OnFail.REJECT;
+        return OnFail.WARN; // padrão: avisa e aceita (como a estática, as crenças e os objetivos)
     }
 
     public static boolean beliefsEnabled() {
