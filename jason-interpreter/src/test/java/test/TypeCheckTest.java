@@ -176,6 +176,12 @@ public class TypeCheckTest extends TestCase {
         assertHasProblem("tipo desconhecido 'cores'", check("{ type(cor(cores)) } cor(azul)."));
     }
 
+    public void testInternalActionDeclaration() {
+        assertHasProblem("não dá para declarar o tipo de uma ação interna (.print)", check("{ type(.print(string)) }"));
+        // sem o ponto, print é um nome comum (crença, objetivo ou ação do ambiente): é verificado
+        assertProblems(1, check("{ type(print(string)) } +!g <- print(7)."));
+    }
+
     public void testDuplicateDeclaration() {
         assertHasProblem("declaração duplicada", check("{ type(idade(number)) } { type(idade(string)) }"));
         // repetir a mesma declaração não é problema

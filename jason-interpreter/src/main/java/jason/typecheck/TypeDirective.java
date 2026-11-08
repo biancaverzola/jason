@@ -5,6 +5,7 @@ import java.util.List;
 
 import jason.asSemantics.Agent;
 import jason.asSyntax.Literal;
+import jason.asSyntax.InternalActionLiteral;
 import jason.asSyntax.ListTerm;
 import jason.asSyntax.Pred;
 import jason.asSyntax.RelExpr;
@@ -89,6 +90,12 @@ public class TypeDirective extends DefaultDirective {
             return null;
         }
         Literal l = (Literal) t;
+        if (l instanceof InternalActionLiteral || l.getFunctor().startsWith(".")) {
+            // ex.: .print(string): os argumentos das ações internas não são verificados (nível 3)
+            report.addProblem(loc, t.toString(), "não dá para declarar o tipo de uma ação interna (" + l.getFunctor()
+                    + "); o verificador não confere os argumentos das ações internas", null);
+            return null;
+        }
         List<Type> args = new ArrayList<>();
         for (int i = 0; i < l.getArity(); i++) {
             Type at = Type.fromTerm(l.getTerm(i));
