@@ -238,19 +238,22 @@ public class TypeChecker {
         // (ArithFunctionTerm), então a conta precisa ser testada primeiro
         if (t instanceof ArithExpr) {                  // ex.: T + 1
             checkArith((ArithExpr) t, s, c);
-            expect(expected, Type.NUMBER, t, c, d, pos);
+            Term v = TypeDirective.evalNumber(t);      // conta sem variáveis (ex.: -1): confere o resultado
+            if (expected.isEnum() && v != t)
+                checkEnumValue(v, expected, c, d, pos);
+            else
+                expect(expected, Type.NUMBER, t, c, d, pos);
             return;
         }
         if (t instanceof ArithFunctionTerm) {          // ex.: math.abs(X)
             expect(expected, Type.NUMBER, t, c, d, pos);
             return;
         }
-        if (t.isNumeric()) {
-            expect(expected, Type.NUMBER, t, c, d, pos);
-            return;
-        }
-        if (t.isString()) {
-            expect(expected, Type.STRING, t, c, d, pos);
+        if (t.isNumeric() || t.isString()) {
+            if (expected.isEnum())                     // ex.: nota = [1, 2, 3]: o valor precisa ser um deles
+                checkEnumValue(t, expected, c, d, pos);
+            else
+                expect(expected, constantType(t), t, c, d, pos);
             return;
         }
         if (t.isList()) {
@@ -271,13 +274,34 @@ public class TypeChecker {
 
     private void checkAtom(Literal atom, Type expected, Ctx c, TypeDecl d, String pos) {
         if (expected.isEnum()) {           // ex.: cor = [amarela, azul]: o átomo precisa ser um deles
-            if (!expected.getEnumValues().contains(atom.getFunctor()))
-                problem(c, pos + ": esperado " + expected.describeEnum() + ", encontrado " + atom, d);
+            checkEnumValue(atom, expected, c, d, pos);
             return;
         }
         if (expected.isStruct() && atom.getFunctor().equals(expected.getStructName()) && table.has(atom.getFunctor(), 0))
             return; // ex.: tipo "vazio" declarado como vazio
         expect(expected, isBoolean(atom) ? Type.BOOLEAN : Type.ATOM, atom, c, d, pos);
+    }
+
+    /**
+     * Confere um valor escrito no código (átomo, número ou string) contra um tipo enumerado:
+     * primeiro o tipo do valor (ex.: string onde se espera nota), depois se é um dos valores.
+     */
+    private void checkEnumValue(Term v, Type expected, Ctx c, TypeDecl d, String pos) {
+        Type actual = constantType(v);
+        if (!Type.accepts(expected, actual)) {
+            problem(c, pos + ": esperado " + expected + ", encontrado " + actual + " (" + v + ")", d);
+            return;
+        }
+        String key = Type.enumKey(v);
+        if (key != null && !expected.getEnumValues().contains(key))
+            problem(c, pos + ": esperado " + expected.describeEnum() + ", encontrado " + v, d);
+    }
+
+    /** o tipo de um valor escrito no código: number, string, boolean ou atom */
+    private static Type constantType(Term v) {
+        if (v.isNumeric()) return Type.NUMBER;
+        if (v.isString())  return Type.STRING;
+        return v.isLiteral() && isBoolean((Literal) v) ? Type.BOOLEAN : Type.ATOM;
     }
 
     private void checkStructure(Literal l, Type expected, Ctx c, TypeDecl d, String pos) {
@@ -346,7 +370,7 @@ public class TypeChecker {
             case gt: case gte: case lt: case lte: {
                 // em Jason, > e < também comparam átomos e strings; então só deduzimos
                 // "é número" quando um dos lados já é sabidamente um número
-                if (typeOf(lhs, s).getKind() == Type.Kind.NUMBER || typeOf(rhs, s).getKind() == Type.Kind.NUMBER) {
+                if (isNumber(typeOf(lhs, s)) || isNumber(typeOf(rhs, s))) {
                     checkNumericOperand(lhs, where, s, c);
                     checkNumericOperand(rhs, where, s, c);
                 }
@@ -361,12 +385,12 @@ public class TypeChecker {
                     bindList((VarTerm) rhs, (ListTerm) lhs, s, c, where);
                     break;
                 }
-                if (isNamedVar(lhs) && TypeDirective.isPlainAtom(rhs)) {   // ex.: C = vermelho, C == azul
-                    bindAtom((VarTerm) lhs, (Literal) rhs, s, c, where);
+                if (isNamedVar(lhs) && isConstant(rhs)) {      // ex.: C = vermelho, N == 7, T = "P"
+                    bindConstant((VarTerm) lhs, rhs, s, c, where);
                     break;
                 }
-                if (isNamedVar(rhs) && TypeDirective.isPlainAtom(lhs)) {   // ex.: azul == C
-                    bindAtom((VarTerm) rhs, (Literal) lhs, s, c, where);
+                if (isNamedVar(rhs) && isConstant(lhs)) {      // ex.: azul == C
+                    bindConstant((VarTerm) rhs, lhs, s, c, where);
                     break;
                 }
                 Type tl = typeOf(lhs, s);
@@ -411,24 +435,36 @@ public class TypeChecker {
         }
     }
 
+    /** um valor escrito no código que pode ser valor de enumerado: átomo, número ou string */
+    private static boolean isConstant(Term t) {
+        return (t.isNumeric() && !t.isArithExpr()) || t.isString() || TypeDirective.isPlainAtom(t);
+    }
+
+    /** number, ou um enumerado de números (ex.: nota = [1, 2, 3]) */
+    private static boolean isNumber(Type t) {
+        return t.getKind() == Type.Kind.NUMBER || (t.isEnum() && t.getEnumBase() == Type.Kind.NUMBER);
+    }
+
     /**
-     * A variável v recebe (ou é comparada com) o átomo a (ex.: C = vermelho, C == azul).
-     * Se v já é de um tipo enumerado, o átomo é conferido agora. Senão, v passa a ser um
-     * átomo e o átomo é guardado, para conferir quando v for usada onde se espera um tipo
-     * enumerado (ver constrainVar).
+     * A variável v recebe (ou é comparada com) um valor escrito no código
+     * (ex.: C = vermelho, N == 7, T = "P").
+     * Se v já é de um tipo enumerado, o valor é conferido agora. Senão, v passa a ter o
+     * tipo do valor e o valor é guardado, para conferir quando v for usada onde se espera
+     * um tipo enumerado (ver constrainVar).
      */
-    private void bindAtom(VarTerm v, Literal a, Scope s, Ctx c, String where) {
+    private void bindConstant(VarTerm v, Term value, Scope s, Ctx c, String where) {
         String name = v.getFunctor();
         VarInfo info = s.vars.get(name);
         if (info != null && info.type.isEnum()) {
-            checkAtom(a, info.type, c, null, where + " (" + name + " vem de " + info.origin + ")");
+            checkEnumValue(value, info.type, c, null, where + " (" + name + " vem de " + info.origin + ")");
             return;
         }
         String origin = where + ", linha " + c.line;
-        constrainVar(v, isBoolean(a) ? Type.BOOLEAN : Type.ATOM, s, c, where, origin, null);
+        Type vt = constantType(value);
+        constrainVar(v, vt, s, c, where, origin, null);
         info = s.vars.get(name);
-        if (info.type.getKind() == Type.Kind.ATOM || info.type.getKind() == Type.Kind.BOOLEAN) {
-            info.value       = a;
+        if (!info.type.isEnum() && Type.accepts(info.type, vt)) {
+            info.value       = value;
             info.valueOrigin = origin;
         }
     }
@@ -467,10 +503,10 @@ public class TypeChecker {
                 info.value = null;
                 checkList(lt, t, s, c, d, pos + " (" + name + " vem de " + info.valueOrigin + ")");
             } else if (info.value != null && !info.value.isList() && t.isEnum()) {
-                // ex.: C = vermelho; +mochila(C): confere o átomo que C recebeu
-                Literal a = (Literal) info.value;
+                // ex.: C = vermelho; +mochila(C): confere o valor que C recebeu
+                Term value = info.value;
                 info.value = null;
-                checkAtom(a, t, c, d, pos + " (" + name + " vem de " + info.valueOrigin + ")");
+                checkEnumValue(value, t, c, d, pos + " (" + name + " vem de " + info.valueOrigin + ")");
             }
             if (info.type.isAny())
                 info.origin = origin;

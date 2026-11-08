@@ -144,8 +144,44 @@ public class TypeCheckTest extends TestCase {
         assertTrue(check(mas, "{ type(cor = [roxo]) } mochila(roxo).").isOk());
     }
 
+    public void testNumberEnum() {
+        String decls = "{ type(nota = [1, 2, 3, 4, 5], avaliacao(atom, nota)) } ";
+        assertTrue(check(decls + "avaliacao(filme, 4). avaliacao(livro, 1).").isOk());
+        assertHasProblem("argumento 2: esperado nota (1, 2, 3, 4, 5), encontrado 7", check(decls + "avaliacao(filme, 7)."));
+        assertHasProblem("esperado nota, encontrado string", check(decls + "avaliacao(filme, \"4\")."));
+        assertHasProblem("esperado nota, encontrado atom", check(decls + "avaliacao(filme, quatro)."));
+        // nota é um número: pode ir em contas e comparações
+        assertTrue(check(decls + "+!x : avaliacao(F, N) & N > 3 <- X = N + 1.").isOk());
+        assertTrue(check(decls + "{ type(peso(number)) } +!x : avaliacao(F, N) <- +peso(N).").isOk());
+        // valor que passa por variável ou comparação
+        assertHasProblem("encontrado 7", check(decls + "+!x <- N = 7; +avaliacao(filme, N)."));
+        assertHasProblem("encontrado 9", check(decls + "+!x : avaliacao(F, N) & N == 9 <- true."));
+        // limitação: o resultado de uma conta não é conferido
+        assertTrue(check(decls + "+!x : avaliacao(F, N) <- +avaliacao(F, N + 5).").isOk());
+        // números negativos e decimais
+        assertTrue(check("{ type(d = [-1, 0, 2.5], v(d)) } v(-1). v(2.5).").isOk());
+        assertProblems(1, check("{ type(d = [-1, 0, 2.5], v(d)) } v(1)."));
+    }
+
+    public void testStringEnum() {
+        String decls = "{ type(tamanho = [\"P\", \"M\", \"G\"], camisa(tamanho)) } ";
+        assertTrue(check(decls + "camisa(\"M\").").isOk());
+        assertHasProblem("esperado tamanho (\"P\", \"M\", \"G\"), encontrado \"GG\"", check(decls + "camisa(\"GG\")."));
+        assertHasProblem("esperado tamanho, encontrado atom", check(decls + "camisa(m)."));
+        assertTrue(check(decls + "{ type(nome(string)) } +!x : camisa(T) <- +nome(T).").isOk());
+    }
+
+    public void testEnumInMas2jWithNumbersAndStrings() throws Exception {
+        String mas = "MAS m { agents: a; types { nota = [1, 2, -3, 4.5]; t = [\"P\", \"M\"]; b = [true, false, talvez]; v(nota, t, b); } }";
+        assertTrue(check(mas, "v(-3, \"P\", talvez). v(4.5, \"M\", true).").isOk());
+        assertProblems(3, check(mas, "v(3, \"G\", nao)."));
+    }
+
     public void testInvalidEnumDeclarations() {
-        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [amarela, 3]) }"));
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [amarela, 3]) }"));       // misturado
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [1, \"a\"]) }"));         // misturado
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [f(1)]) }"));             // estrutura
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [X]) }"));                // variável
         assertHasProblem("tipo enumerado inválido", check("{ type(cor = []) }"));
         assertHasProblem("tipo enumerado inválido", check("{ type(number = [a]) }"));
         assertHasProblem("declaração duplicada", check("{ type(cor = [a]) } { type(cor = [b]) }"));

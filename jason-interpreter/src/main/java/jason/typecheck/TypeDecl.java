@@ -17,7 +17,8 @@ public class TypeDecl {
     private final String     srcFile;
     private final int        srcLine;
     private final boolean    fromMas2j; // true = declarada no .mas2j (vale para todos os agentes)
-    private final List<String> enumValues; // só para tipo enumerado: os átomos aceitos
+    private final List<String> enumValues; // só para tipo enumerado: os valores aceitos (ver Type.enumKey)
+    private final Type.Kind    enumBase;   // só para tipo enumerado: ATOM, NUMBER ou STRING
 
     public TypeDecl(String functor, List<Type> argTypes, String srcFile, int srcLine, boolean fromMas2j) {
         this.functor   = functor;
@@ -26,22 +27,24 @@ public class TypeDecl {
         this.srcLine   = srcLine;
         this.fromMas2j = fromMas2j;
         this.enumValues = null;
+        this.enumBase   = null;
     }
 
-    /** declaração de tipo enumerado, ex.: cor = [amarela, azul] */
-    public TypeDecl(String name, List<String> enumValues, String srcFile, int srcLine, boolean fromMas2j, boolean isEnum) {
+    /** declaração de tipo enumerado, ex.: cor = [amarela, azul], nota = [1, 2, 3] */
+    public TypeDecl(String name, Type.Kind enumBase, List<String> enumValues, String srcFile, int srcLine, boolean fromMas2j) {
         this.functor    = name;
         this.argTypes   = List.of();
         this.srcFile    = srcFile;
         this.srcLine    = srcLine;
         this.fromMas2j  = fromMas2j;
         this.enumValues = List.copyOf(enumValues);
+        this.enumBase   = enumBase;
     }
 
     public boolean      isEnum()        { return enumValues != null; }
     public List<String> getEnumValues() { return enumValues; }
     /** o tipo que esta declaração enumerada define */
-    public Type         getEnumType()   { return Type.enumOf(functor, enumValues); }
+    public Type         getEnumType()   { return Type.enumOf(functor, enumBase, enumValues); }
 
     public String     getFunctor()     { return functor; }
     public int        getArity()       { return argTypes.size(); }

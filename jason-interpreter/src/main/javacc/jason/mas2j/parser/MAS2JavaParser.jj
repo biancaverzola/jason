@@ -361,23 +361,34 @@ void sourcepath() :         { Token cp; }
      types {
          temperatura(atom, number);
          caminho(list(pos));
-         cor = [amarela, azul, vermelha];      // tipo enumerado
+         cor = [amarela, azul, vermelha];      // tipo enumerado (átomos, números ou strings)
+         nota = [1, 2, 3, 4, 5];
      }
 */
-void types() :              { Token f; Token v; String a; String decl; String vals; }
+void types() :              { Token f; String a; String decl; String vals; String v; }
 {
   [ <TYPES> "{"
     (
       f = <ASID>            { decl = f.image; }
       [ "(" a = typeArgs() ")"  { decl += "(" + a + ")"; }
-      | "=" "[" v = <ASID>  { vals = v.image; }
-            ( "," v = <ASID> { vals += "," + v.image; } )*
+      | "=" "[" v = enumValue()  { vals = v; }
+            ( "," v = enumValue() { vals += "," + v; } )*
         "]"                 { decl += " = [" + vals + "]"; }
       ]
       ";"                   { addTypeDecl(decl, f.beginLine); }
     )*
     "}"
   ]
+}
+
+/* valor de um tipo enumerado: átomo, número (pode ser negativo) ou string */
+String enumValue() :        { Token t; String sign = ""; }
+{
+  (   t = <ASID>
+    | t = <ASOBOOL>
+    | t = <STRING>
+    | [ "-"                 { sign = "-"; } ] t = <NUMBER>
+  )                         { return sign + t.image; }
 }
 
 String typeArgs() :         { String s; String r; }

@@ -14,43 +14,64 @@ import jason.asSyntax.Term;
  *  - atom, number, string, boolean, list, any
  *  - list(T): lista cujos elementos são do tipo T
  *  - nome de um predicado declarado (ex.: pos, quando existe a declaração pos(number, number))
- *  - nome de um tipo enumerado (ex.: cor, quando existe a declaração cor = [amarela, azul]):
- *    só aceita os átomos listados
+ *  - nome de um tipo enumerado: só aceita os valores listados, que são todos átomos,
+ *    todos números ou todos strings, ex.: cor = [amarela, azul], nota = [1, 2, 3],
+ *    tamanho = ["P", "M", "G"]
  */
 public final class Type {
 
     public enum Kind { ATOM, NUMBER, STRING, BOOLEAN, LIST, ANY, STRUCT, ENUM }
 
-    public static final Type ATOM    = new Type(Kind.ATOM,    null, null, null);
-    public static final Type NUMBER  = new Type(Kind.NUMBER,  null, null, null);
-    public static final Type STRING  = new Type(Kind.STRING,  null, null, null);
-    public static final Type BOOLEAN = new Type(Kind.BOOLEAN, null, null, null);
-    public static final Type LIST    = new Type(Kind.LIST,    null, null, null); // list sem tipo dos elementos
-    public static final Type ANY     = new Type(Kind.ANY,     null, null, null);
+    public static final Type ATOM    = new Type(Kind.ATOM,    null, null, null, null);
+    public static final Type NUMBER  = new Type(Kind.NUMBER,  null, null, null, null);
+    public static final Type STRING  = new Type(Kind.STRING,  null, null, null, null);
+    public static final Type BOOLEAN = new Type(Kind.BOOLEAN, null, null, null, null);
+    public static final Type LIST    = new Type(Kind.LIST,    null, null, null, null); // list sem tipo dos elementos
+    public static final Type ANY     = new Type(Kind.ANY,     null, null, null, null);
 
     private final Kind   kind;
     private final String structName; // só para STRUCT e ENUM (o nome do tipo)
     private final Type   elemType;   // só para list(T)
-    private final List<String> enumValues; // só para ENUM: os átomos aceitos
+    private final List<String> enumValues; // só para ENUM: os valores aceitos (como texto, ver enumKey)
+    private final Kind   enumBase;   // só para ENUM: ATOM, NUMBER ou STRING (o tipo dos valores)
 
-    private Type(Kind kind, String structName, Type elemType, List<String> enumValues) {
+    private Type(Kind kind, String structName, Type elemType, List<String> enumValues, Kind enumBase) {
         this.kind       = kind;
         this.structName = structName;
         this.elemType   = elemType;
         this.enumValues = enumValues;
+        this.enumBase   = enumBase;
     }
 
     public static Type listOf(Type elem) {
-        return new Type(Kind.LIST, null, elem, null);
+        return new Type(Kind.LIST, null, elem, null, null);
     }
 
     public static Type struct(String name) {
-        return new Type(Kind.STRUCT, name, null, null);
+        return new Type(Kind.STRUCT, name, null, null, null);
     }
 
-    /** tipo enumerado, ex.: cor = [amarela, azul] */
-    public static Type enumOf(String name, List<String> values) {
-        return new Type(Kind.ENUM, name, null, List.copyOf(values));
+    /**
+     * tipo enumerado, ex.: cor = [amarela, azul]
+     * @param base   o tipo dos valores: ATOM, NUMBER ou STRING
+     * @param values os valores, como texto (ver enumKey)
+     */
+    public static Type enumOf(String name, Kind base, List<String> values) {
+        return new Type(Kind.ENUM, name, null, List.copyOf(values), base);
+    }
+
+    /**
+     * O texto usado para comparar um valor com os valores de um enumerado:
+     * amarela, 3, 2.5, -1, "P". Retorna null se o termo não pode ser valor de enumerado.
+     */
+    public static String enumKey(Term t) {
+        if (t.isNumeric() && !t.isArithExpr())
+            return t.toString();
+        if (t.isString())
+            return t.toString();
+        if (t.isLiteral() && !t.isVar() && ((Literal) t).getArity() == 0 && !t.isList())
+            return ((Literal) t).getFunctor();
+        return null;
     }
 
     public Kind   getKind()       { return kind; }
@@ -63,8 +84,10 @@ public final class Type {
     public boolean isStruct() { return kind == Kind.STRUCT; }
     public boolean isEnum()   { return kind == Kind.ENUM; }
 
-    /** os átomos aceitos por um tipo enumerado */
+    /** os valores aceitos por um tipo enumerado */
     public List<String> getEnumValues() { return enumValues; }
+    /** o tipo dos valores de um enumerado: ATOM, NUMBER ou STRING */
+    public Kind getEnumBase() { return enumBase; }
 
     /** ex.: "cor (amarela, azul, vermelha)", para as mensagens */
     public String describeEnum() {
@@ -111,14 +134,19 @@ public final class Type {
             return true;
         switch (expected.kind) {
             case ATOM:
-                // true e false são átomos em Jason; os valores de um tipo enumerado também
-                return actual.kind == Kind.ATOM || actual.kind == Kind.BOOLEAN || actual.kind == Kind.ENUM;
+                // true e false são átomos em Jason; os valores de um enumerado de átomos também
+                return actual.kind == Kind.ATOM || actual.kind == Kind.BOOLEAN
+                    || (actual.kind == Kind.ENUM && actual.enumBase == Kind.ATOM);
+            case NUMBER:
+            case STRING:
+                // um valor de nota = [1, 2, 3] é um number; de tamanho = ["P", "M"], uma string
+                return actual.kind == expected.kind || (actual.kind == Kind.ENUM && actual.enumBase == expected.kind);
             case ENUM:
-                // um átomo qualquer é aceito aqui: QUAL átomo é conferido onde o valor está
-                // escrito (ver TypeChecker.checkAtom), não pelo tipo
+                // um valor qualquer do tipo base é aceito aqui: QUAL valor é conferido onde ele
+                // está escrito (ver TypeChecker.checkEnumValue), não pelo tipo
                 if (actual.kind == Kind.ENUM)
                     return expected.structName.equals(actual.structName);
-                return actual.kind == Kind.ATOM || actual.kind == Kind.BOOLEAN;
+                return accepts(expected.base(), actual);
             case BOOLEAN:
                 return actual.kind == Kind.BOOLEAN;
             case LIST:
@@ -134,6 +162,15 @@ public final class Type {
         }
     }
 
+    /** o tipo dos valores de um enumerado, como Type (ex.: nota -> number) */
+    Type base() {
+        switch (enumBase) {
+            case NUMBER: return NUMBER;
+            case STRING: return STRING;
+            default:     return ATOM;
+        }
+    }
+
     /** dois tipos são compatíveis se algum deles aceita o outro */
     public static boolean compatible(Type a, Type b) {
         return accepts(a, b) || accepts(b, a);
@@ -144,7 +181,7 @@ public final class Type {
         if (a.isAny()) return b;
         if (b.isAny()) return a;
         if (a.kind == Kind.ATOM && b.kind == Kind.BOOLEAN) return b;
-        if ((a.kind == Kind.ATOM || a.kind == Kind.BOOLEAN) && b.kind == Kind.ENUM) return b;
+        if (b.kind == Kind.ENUM && a.kind != Kind.ENUM) return b; // ex.: number e nota -> nota
         if (a.kind == Kind.LIST && a.elemType == null) return b;
         return a;
     }
@@ -178,7 +215,7 @@ public final class Type {
         if (!(o instanceof Type)) return false;
         Type t = (Type) o;
         return kind == t.kind && Objects.equals(structName, t.structName) && Objects.equals(elemType, t.elemType)
-            && Objects.equals(enumValues, t.enumValues);
+            && Objects.equals(enumValues, t.enumValues) && enumBase == t.enumBase;
     }
 
     @Override

@@ -5,6 +5,8 @@ import java.util.List;
 
 import jason.asSemantics.Agent;
 import jason.asSyntax.Literal;
+import jason.asSemantics.Unifier;
+import jason.asSyntax.ArithExpr;
 import jason.asSyntax.InternalActionLiteral;
 import jason.asSyntax.ListTerm;
 import jason.asSyntax.Pred;
@@ -109,9 +111,10 @@ public class TypeDirective extends DefaultDirective {
         return new TypeDecl(l.getFunctor(), args, file, line, fromMas2j);
     }
 
-    private static final String ENUM_FORM = "tipo enumerado inválido, use a forma nome = [valor1, valor2, ...], com átomos, ex.: cor = [amarela, azul]";
+    private static final String ENUM_FORM = "tipo enumerado inválido, use a forma nome = [valor1, valor2, ...], com valores do mesmo tipo "
+            + "(todos átomos, todos números ou todos strings), ex.: cor = [amarela, azul], nota = [1, 2, 3], tamanho = [\"P\", \"M\"]";
 
-    /** cor = [amarela, azul, vermelha] */
+    /** cor = [amarela, azul, vermelha]   nota = [1, 2, 3]   tamanho = ["P", "M", "G"] */
     private static TypeDecl parseEnumDecl(RelExpr r, String file, int line, boolean fromMas2j, TypeCheckReport report) {
         String loc  = TypeCheckReport.shortFile(file) + ":" + line;
         String code = r.getLHS() + " = " + r.getRHS();
@@ -122,22 +125,46 @@ public class TypeDirective extends DefaultDirective {
                 && Type.fromTerm(name) != null && Type.fromTerm(name).isStruct()  // não pode ser number, atom, ...
                 && vals.isList() && !((ListTerm) vals).isEmpty();
         List<String> values = new ArrayList<>();
+        Type.Kind base = null;
         if (ok) {
             ListTerm lt = (ListTerm) vals;
             if (lt.getTail() != null)   // [a|T]
                 ok = false;
             for (Term v : lt.getAsList()) {
-                if (!isPlainAtom(v)) { ok = false; break; }
-                String a = ((Literal) v).getFunctor();
-                if (!values.contains(a))
-                    values.add(a);
+                v = evalNumber(v);      // ex.: -1 é lido como a conta -(1)
+                Type.Kind k = enumValueKind(v);
+                if (k == null || (base != null && k != base)) { ok = false; break; } // inválido ou misturado
+                base = k;
+                String key = Type.enumKey(v);
+                if (!values.contains(key))
+                    values.add(key);
             }
         }
         if (!ok) {
             report.addProblem(loc, code, ENUM_FORM, null);
             return null;
         }
-        return new TypeDecl(((Literal) name).getFunctor(), values, file, line, fromMas2j, true);
+        return new TypeDecl(((Literal) name).getFunctor(), base, values, file, line, fromMas2j);
+    }
+
+    /** o tipo de um valor de enumerado: ATOM, NUMBER, STRING, ou null se não pode ser valor */
+    private static Type.Kind enumValueKind(Term v) {
+        if (v.isNumeric() && !v.isArithExpr()) return Type.Kind.NUMBER;
+        if (v.isString())                      return Type.Kind.STRING;
+        if (isPlainAtom(v))                    return Type.Kind.ATOM;
+        return null;
+    }
+
+    /** se o termo é uma conta sem variáveis (ex.: -1), retorna o resultado; senão, o próprio termo */
+    static Term evalNumber(Term t) {
+        if (t instanceof ArithExpr && t.isGround()) {
+            try {
+                return ((ArithExpr) t).capply(new Unifier());
+            } catch (Exception e) {
+                // não conseguiu calcular: fica com o termo
+            }
+        }
+        return t;
     }
 
     /** um átomo simples, ex.: amarela (não variável, número, string ou estrutura) */
