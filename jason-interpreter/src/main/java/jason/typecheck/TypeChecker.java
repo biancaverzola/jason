@@ -94,24 +94,36 @@ public class TypeChecker {
     // ------------------------------------------------------------------
 
     public void checkAgent(Agent ag) {
+        // cada crença, objetivo e plano é verificado separadamente: se houver um erro interno
+        // (um bug do verificador) em um deles, só ele fica sem verificação (ver 4.19)
         for (Literal b : ag.getInitialBels()) {
-            Ctx c = ctxFor(b, null);
-            Scope s = new Scope();
-            if (b.isRule()) {
-                Rule r = (Rule) b;
-                checkLiteral(r.getHead(), s, c);
-                checkFormula(r.getBody(), s, c);
-            } else {
-                checkLiteral(b, s, c);
-            }
+            safely(() -> {
+                Ctx c = ctxFor(b, null);
+                Scope s = new Scope();
+                if (b.isRule()) {
+                    Rule r = (Rule) b;
+                    checkLiteral(r.getHead(), s, c);
+                    checkFormula(r.getBody(), s, c);
+                } else {
+                    checkLiteral(b, s, c);
+                }
+            });
         }
 
         for (Literal g : ag.getInitialGoals()) {
-            checkLiteral(g, new Scope(), ctxFor(g, null));
+            safely(() -> checkLiteral(g, new Scope(), ctxFor(g, null)));
         }
 
         for (Plan p : ag.getPL()) {
-            checkPlan(p);
+            safely(() -> checkPlan(p));
+        }
+    }
+
+    private static void safely(Runnable check) {
+        try {
+            check.run();
+        } catch (RuntimeException e) {
+            StaticTypeCheck.internalError(e);
         }
     }
 
@@ -222,12 +234,14 @@ public class TypeChecker {
             return;
         }
 
-        if (t instanceof ArithFunctionTerm) {          // ex.: math.abs(X)
+        // atenção: em Jason, uma conta (ArithExpr) é um caso particular de função
+        // (ArithFunctionTerm), então a conta precisa ser testada primeiro
+        if (t instanceof ArithExpr) {                  // ex.: T + 1
+            checkArith((ArithExpr) t, s, c);
             expect(expected, Type.NUMBER, t, c, d, pos);
             return;
         }
-        if (t.isArithExpr()) {                         // ex.: T + 1
-            checkArith((ArithExpr) t, s, c);
+        if (t instanceof ArithFunctionTerm) {          // ex.: math.abs(X)
             expect(expected, Type.NUMBER, t, c, d, pos);
             return;
         }
@@ -310,10 +324,10 @@ public class TypeChecker {
             return;
         if (t.isVar()) {
             constrainVar((VarTerm) t, Type.NUMBER, s, c, where, where + ", linha " + c.line, null);
+        } else if (t instanceof ArithExpr) {           // conta: testar antes de função (ver checkTerm)
+            checkArith((ArithExpr) t, s, c);
         } else if (t instanceof ArithFunctionTerm) {
             // função aritmética: resultado é número
-        } else if (t.isArithExpr()) {
-            checkArith((ArithExpr) t, s, c);
         } else if (!t.isNumeric()) {
             problem(c, where + ": esperado number, encontrado " + Type.describeValue(t), null);
         }
@@ -423,7 +437,7 @@ public class TypeChecker {
     private void checkInside(Term t, Scope s, Ctx c) {
         if (t == null || t.isVar())
             return;
-        if (t.isArithExpr())
+        if (t instanceof ArithExpr)                    // conta: testar antes de função (ver checkTerm)
             checkArith((ArithExpr) t, s, c);
         else if (t.isList() || (t.isLiteral() && !(t instanceof ArithFunctionTerm)))
             checkTerm(t, Type.ANY, s, c, null, "termo");

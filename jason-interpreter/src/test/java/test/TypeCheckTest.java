@@ -176,6 +176,20 @@ public class TypeCheckTest extends TestCase {
         assertHasProblem("tipo desconhecido 'cores'", check("{ type(cor(cores)) } cor(azul)."));
     }
 
+    public void testArithFunction() {
+        // bug encontrado em 07/11: X = math.abs(-3) quebrava o verificador
+        assertTrue(check("+!g <- X = math.abs(-3); Y = X + 1.").isOk());
+        assertProblems(1, check("{ type(nome(string)) } +!g <- X = math.abs(-3); +nome(X)."));
+    }
+
+    public void testNestedArithmetic() {
+        // bug encontrado em 07/11: contas dentro de predicados e contas dentro de contas não eram conferidas
+        String decls = "{ type(nome(string), temperatura(atom, number)) } ";
+        assertHasProblem("operação N*2: esperado number, encontrado string", check(decls + "+!a : nome(N) <- +temperatura(forno, N * 2)."));
+        assertHasProblem("esperado number, encontrado string", check(decls + "+!b : nome(N) <- X = (N * 2) + 1."));
+        assertTrue(check(decls + "+!c : temperatura(F, T) <- +temperatura(F, (T * 2) + 1).").isOk());
+    }
+
     public void testInternalActionDeclaration() {
         assertHasProblem("não dá para declarar o tipo de uma ação interna (.print)", check("{ type(.print(string)) }"));
         // sem o ponto, print é um nome comum (crença, objetivo ou ação do ambiente): é verificado
