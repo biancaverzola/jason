@@ -26,11 +26,13 @@ import jason.asSyntax.Term;
 import jason.asSyntax.Trigger;
 import jason.asSyntax.Trigger.TEOperator;
 import jason.asSyntax.Trigger.TEType;
+import jason.bb.BeliefBase;
 import jason.util.Config;
 
 /**
  * Verificação de tipos DURANTE A EXECUÇÃO: nas mensagens recebidas pelos agentes, nas
- * crenças adicionadas pelos planos (+crença, -+crença) e nas percepções do ambiente.
+ * crenças adicionadas pelos planos (+crença, -+crença), nas percepções do ambiente e nos
+ * objetivos criados pelos planos (!objetivo, !!objetivo).
  *
  * A verificação estática não consegue ver o que só existe durante a execução:
  *  - .send(X, tell, ...) com o destinatário X decidido durante a execução
@@ -55,8 +57,17 @@ import jason.util.Config;
  *     jason.typecheck.beliefs.onfail = fail     o +crença falha (o plano falha com
  *                                               error(type_error)); a percepção é descartada
  *     jason.typecheck.beliefs = false           desliga a verificação de crenças e percepções
- * (as crenças iniciais não entram aqui: já foram conferidas pela verificação estática;
- *  as crenças vindas de mensagens tell também não: já foram conferidas quando a mensagem chegou)
+ *
+ * Objetivos criados pelos planos (!objetivo, !!objetivo):
+ *     jason.typecheck.goals.onfail = warn       avisa e cria o objetivo mesmo assim (padrão)
+ *     jason.typecheck.goals.onfail = fail       o objetivo não é criado e o plano falha
+ *                                               com error(type_error)
+ *     jason.typecheck.goals = false             desliga a verificação de objetivos
+ *
+ * Não entram aqui: crenças e objetivos iniciais (já conferidos pela verificação estática)
+ * e crenças e objetivos que vêm de mensagens tell / achieve (o Jason os adiciona com um
+ * plano próprio, com ++ e !!, mas eles já foram conferidos quando a mensagem chegou; são
+ * reconhecidos pela anotação source de outro agente).
  *
  * As tabelas de tipos são registradas pelo {@link StaticTypeCheck} no início da execução
  * (e quando um agente é criado com .create_agent).
@@ -67,6 +78,8 @@ public class RuntimeTypeCheck {
     public static final String PROP_ONFAIL  = "jason.typecheck.runtime.onfail";
     public static final String PROP_BELIEFS = "jason.typecheck.beliefs";
     public static final String PROP_BELIEFS_ONFAIL = "jason.typecheck.beliefs.onfail";
+    public static final String PROP_GOALS = "jason.typecheck.goals";
+    public static final String PROP_GOALS_ONFAIL = "jason.typecheck.goals.onfail";
 
     /** percepções com erro já avisadas, por agente (para não repetir o aviso a cada ciclo) */
     private static final java.util.Map<Agent, Set<String>> reportedPercepts = Collections.synchronizedMap(new WeakHashMap<>());
@@ -132,6 +145,49 @@ public class RuntimeTypeCheck {
         return v != null && "fail".equalsIgnoreCase(v.trim()); // padrão: warn
     }
 
+    public static boolean goalsEnabled() {
+        return isEnabled() && !"false".equalsIgnoreCase(property(PROP_GOALS));
+    }
+
+    static boolean failOnBadGoal() {
+        String v = property(PROP_GOALS_ONFAIL);
+        return v != null && "fail".equalsIgnoreCase(v.trim()); // padrão: warn
+    }
+
+    /** veio de uma mensagem de outro agente (anotação source(outro)): já foi conferido na chegada */
+    private static boolean fromMessage(Literal l) {
+        return l.hasSource() && !l.hasSource(BeliefBase.ASelf);
+    }
+
+    /**
+     * Chamado pelo TransitionSystem quando um plano vai criar um objetivo (!objetivo, !!objetivo).
+     * @return null se o objetivo pode ser criado; a mensagem de erro se o plano deve falhar
+     *         (só com jason.typecheck.goals.onfail = fail)
+     */
+    public static String checkGoal(TransitionSystem ts, Literal goal, Intention i) {
+        try {
+            return doCheckGoal(ts, goal, i);
+        } catch (RuntimeException e) {
+            StaticTypeCheck.internalError(e);
+            return null;
+        }
+    }
+
+    private static String doCheckGoal(TransitionSystem ts, Literal goal, Intention i) {
+        if (!goalsEnabled() || fromMessage(goal))
+            return null;
+        TypeTable table = tableFor(ts.getAg());
+        if (table.isEmpty())
+            return null;
+        TypeCheckReport report = checkContent(table, withoutAnnots(goal), beliefLocation(goal, i));
+        if (report.isOk())
+            return null;
+        boolean fail = failOnBadGoal();
+        warn(ts.getAgArch().getAgName() + " criou um objetivo com tipo errado ("
+                + (fail ? "o objetivo não foi criado e o plano falhou" : "objetivo criado mesmo assim") + ")", report);
+        return fail ? report.getProblems().get(0).getMessage() : null;
+    }
+
     /**
      * Chamado pelo TransitionSystem quando um plano vai adicionar uma crença (+crença, -+crença).
      * @return null se a crença pode ser adicionada; a mensagem de erro se o +crença deve falhar
@@ -147,7 +203,7 @@ public class RuntimeTypeCheck {
     }
 
     private static String doCheckBelief(TransitionSystem ts, Literal bel, Intention i) {
-        if (!beliefsEnabled())
+        if (!beliefsEnabled() || fromMessage(bel))
             return null;
         TypeTable table = tableFor(ts.getAg());
         if (table.isEmpty())
@@ -200,7 +256,7 @@ public class RuntimeTypeCheck {
         return c;
     }
 
-    /** onde a crença foi adicionada, ex.: robo.asl:4 (a linha do +crença no plano) */
+    /** onde a crença (ou objetivo) foi criada, ex.: robo.asl:4 (a linha do +crença no plano) */
     private static String beliefLocation(Literal bel, Intention i) {
         SourceInfo s = bel.getSrcInfo();
         if ((s == null || s.getSrcFile() == null) && i != null && !i.isFinished() && i.peek().getPlan() != null)

@@ -1008,6 +1008,11 @@ public class TransitionSystem implements Serializable {
         // Rule Achieve
         case achieve:
             body = prepareBodyForEvent(body, u, curInt.peek());
+            String goalTypeError = jason.typecheck.RuntimeTypeCheck.checkGoal(this, body, curInt); // checks the types of the goal (see jason.typecheck)
+            if (goalTypeError != null) {
+                generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", goalTypeError), ASSyntax.createAtom("type_error"));
+                break;
+            }
             Event evt = C.addAchvGoal(body, curInt);
             stepAct = State.StartRC;
             checkHardDeadline(evt);
@@ -1016,6 +1021,11 @@ public class TransitionSystem implements Serializable {
         // Rule Achieve as a New Focus (the !! operator)
         case achieveNF:
             body = prepareBodyForEvent(body, u, null);
+            goalTypeError = jason.typecheck.RuntimeTypeCheck.checkGoal(this, body, curInt); // checks the types of the goal (see jason.typecheck)
+            if (goalTypeError != null) {
+                generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", goalTypeError), ASSyntax.createAtom("type_error"));
+                break;
+            }
             evt  = C.addAchvGoal(body, Intention.EmptyInt);
             checkHardDeadline(evt);
             removeActionReQueue(curInt);
