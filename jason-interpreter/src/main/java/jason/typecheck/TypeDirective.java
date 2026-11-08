@@ -112,9 +112,10 @@ public class TypeDirective extends DefaultDirective {
     }
 
     private static final String ENUM_FORM = "tipo enumerado inválido, use a forma nome = [valor1, valor2, ...], com valores do mesmo tipo "
-            + "(todos átomos, todos números ou todos strings), ex.: cor = [amarela, azul], nota = [1, 2, 3], tamanho = [\"P\", \"M\"]";
+            + "(todos átomos, todos números, todos strings ou todos estruturas com o mesmo nome e sem variáveis), "
+            + "ex.: cor = [amarela, azul], nota = [1, 2, 3], tamanho = [\"P\", \"M\"], canto = [pos(0,0), pos(9,9)]";
 
-    /** cor = [amarela, azul, vermelha]   nota = [1, 2, 3]   tamanho = ["P", "M", "G"] */
+    /** cor = [amarela, azul]   nota = [1, 2, 3]   tamanho = ["P", "M", "G"]   canto = [pos(0,0), pos(9,9)] */
     private static TypeDecl parseEnumDecl(RelExpr r, String file, int line, boolean fromMas2j, TypeCheckReport report) {
         String loc  = TypeCheckReport.shortFile(file) + ":" + line;
         String code = r.getLHS() + " = " + r.getRHS();
@@ -125,33 +126,37 @@ public class TypeDirective extends DefaultDirective {
                 && Type.fromTerm(name) != null && Type.fromTerm(name).isStruct()  // não pode ser number, atom, ...
                 && vals.isList() && !((ListTerm) vals).isEmpty();
         List<String> values = new ArrayList<>();
-        Type.Kind base = null;
+        List<Term>   terms  = new ArrayList<>();
+        Type base = null;
         if (ok) {
             ListTerm lt = (ListTerm) vals;
             if (lt.getTail() != null)   // [a|T]
                 ok = false;
             for (Term v : lt.getAsList()) {
                 v = evalNumber(v);      // ex.: -1 é lido como a conta -(1)
-                Type.Kind k = enumValueKind(v);
-                if (k == null || (base != null && k != base)) { ok = false; break; } // inválido ou misturado
+                Type k = enumValueType(v);
+                if (k == null || (base != null && !k.equals(base))) { ok = false; break; } // inválido ou misturado
                 base = k;
                 String key = Type.enumKey(v);
-                if (!values.contains(key))
+                if (!values.contains(key)) {
                     values.add(key);
+                    terms.add(v);
+                }
             }
         }
         if (!ok) {
             report.addProblem(loc, code, ENUM_FORM, null);
             return null;
         }
-        return new TypeDecl(((Literal) name).getFunctor(), base, values, file, line, fromMas2j);
+        return new TypeDecl(((Literal) name).getFunctor(), base, values, terms, file, line, fromMas2j);
     }
 
-    /** o tipo de um valor de enumerado: ATOM, NUMBER, STRING, ou null se não pode ser valor */
-    private static Type.Kind enumValueKind(Term v) {
-        if (v.isNumeric() && !v.isArithExpr()) return Type.Kind.NUMBER;
-        if (v.isString())                      return Type.Kind.STRING;
-        if (isPlainAtom(v))                    return Type.Kind.ATOM;
+    /** o tipo de um valor de enumerado: atom, number, string, a estrutura (ex.: pos), ou null se não pode ser valor */
+    private static Type enumValueType(Term v) {
+        if (v.isNumeric() && !v.isArithExpr()) return Type.NUMBER;
+        if (v.isString())                      return Type.STRING;
+        if (isPlainAtom(v))                    return Type.ATOM;
+        if (Type.enumKey(v) != null)           return Type.struct(((Literal) v).getFunctor()); // ex.: pos(0,0)
         return null;
     }
 

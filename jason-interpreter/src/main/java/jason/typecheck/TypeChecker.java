@@ -94,6 +94,8 @@ public class TypeChecker {
     // ------------------------------------------------------------------
 
     public void checkAgent(Agent ag) {
+        safely(this::checkEnumDecls);
+
         // cada crença, objetivo e plano é verificado separadamente: se houver um erro interno
         // (um bug do verificador) em um deles, só ele fica sem verificação (ver 4.19)
         for (Literal b : ag.getInitialBels()) {
@@ -116,6 +118,19 @@ public class TypeChecker {
 
         for (Plan p : ag.getPL()) {
             safely(() -> checkPlan(p));
+        }
+    }
+
+    /**
+     * Os valores de um enumerado de estruturas também são conferidos contra a declaração
+     * da estrutura, ex.: canto = [pos(0, "a")] com pos(number, number) -> erro.
+     */
+    private void checkEnumDecls() {
+        for (TypeDecl e : table.getEnums()) {
+            if (!e.getEnumType().getEnumBase().isStruct())
+                continue;
+            for (Term v : e.getEnumTerms())
+                checkLiteral((Literal) v, new Scope(), new Ctx(e.getSrcFile(), e.getSrcLine(), v.toString()));
         }
     }
 
@@ -266,7 +281,15 @@ public class TypeChecker {
                 checkAtom(l, expected, c, d, pos);
             } else {
                 checkLiteral(l, s, c);  // a estrutura também pode ter tipo declarado (ex.: pos(3,5))
-                checkStructure(l, expected, c, d, pos);
+                if (expected.isEnum()) {           // ex.: canto = [pos(0,0), pos(9,9)]
+                    if (l.isGround())
+                        checkEnumValue(l, expected, c, d, pos);
+                    else if (!Type.accepts(expected, Type.struct(l.getFunctor())))
+                        problem(c, pos + ": esperado " + expected + ", encontrado a estrutura " + l, d);
+                    // pos(X, Y): com variáveis, não dá para saber se é um dos valores
+                } else {
+                    checkStructure(l, expected, c, d, pos);
+                }
             }
         }
         // outros termos (mapas, conjuntos, objetos Java): não verificados
@@ -289,7 +312,8 @@ public class TypeChecker {
     private void checkEnumValue(Term v, Type expected, Ctx c, TypeDecl d, String pos) {
         Type actual = constantType(v);
         if (!Type.accepts(expected, actual)) {
-            problem(c, pos + ": esperado " + expected + ", encontrado " + actual + " (" + v + ")", d);
+            String found = actual.isStruct() ? "a estrutura " + v : actual + " (" + v + ")";
+            problem(c, pos + ": esperado " + expected + ", encontrado " + found, d);
             return;
         }
         String key = Type.enumKey(v);
@@ -297,10 +321,12 @@ public class TypeChecker {
             problem(c, pos + ": esperado " + expected.describeEnum() + ", encontrado " + v, d);
     }
 
-    /** o tipo de um valor escrito no código: number, string, boolean ou atom */
+    /** o tipo de um valor escrito no código: number, string, boolean, atom ou a estrutura (ex.: pos) */
     private static Type constantType(Term v) {
         if (v.isNumeric()) return Type.NUMBER;
         if (v.isString())  return Type.STRING;
+        if (v.isLiteral() && ((Literal) v).getArity() > 0)
+            return Type.struct(((Literal) v).getFunctor());
         return v.isLiteral() && isBoolean((Literal) v) ? Type.BOOLEAN : Type.ATOM;
     }
 
@@ -435,14 +461,14 @@ public class TypeChecker {
         }
     }
 
-    /** um valor escrito no código que pode ser valor de enumerado: átomo, número ou string */
+    /** um valor escrito no código que pode ser valor de enumerado: átomo, número, string ou estrutura sem variáveis */
     private static boolean isConstant(Term t) {
-        return (t.isNumeric() && !t.isArithExpr()) || t.isString() || TypeDirective.isPlainAtom(t);
+        return Type.enumKey(t) != null;
     }
 
     /** number, ou um enumerado de números (ex.: nota = [1, 2, 3]) */
     private static boolean isNumber(Type t) {
-        return t.getKind() == Type.Kind.NUMBER || (t.isEnum() && t.getEnumBase() == Type.Kind.NUMBER);
+        return t.getKind() == Type.Kind.NUMBER || (t.isEnum() && t.getEnumBase().getKind() == Type.Kind.NUMBER);
     }
 
     /**

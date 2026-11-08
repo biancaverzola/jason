@@ -103,6 +103,11 @@ public class TypeTable {
         return decls.values();
     }
 
+    /** as declarações de tipos enumerados */
+    public Collection<TypeDecl> getEnums() {
+        return enums.values();
+    }
+
     /** true se existe alguma declaração com esse nome (qualquer aridade) */
     public boolean hasFunctor(String functor) {
         for (PredicateIndicator pi : decls.keySet())

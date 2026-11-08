@@ -381,14 +381,19 @@ void types() :              { Token f; String a; String decl; String vals; Strin
   ]
 }
 
-/* valor de um tipo enumerado: átomo, número (pode ser negativo) ou string */
-String enumValue() :        { Token t; String sign = ""; }
+/* valor de um tipo enumerado: átomo, número (pode ser negativo), string ou
+   estrutura sem variáveis, ex.: pos(0,0) */
+String enumValue() :        { Token t; String sign = ""; String s; String a; }
 {
-  (   t = <ASID>
-    | t = <ASOBOOL>
-    | t = <STRING>
-    | [ "-"                 { sign = "-"; } ] t = <NUMBER>
-  )                         { return sign + t.image; }
+  (   t = <ASID>            { s = t.image; }
+      [ "(" a = enumValue() { s += "(" + a; }
+            ( "," a = enumValue() { s += "," + a; } )*
+        ")"                 { s += ")"; }
+      ]
+    | t = <ASOBOOL>         { s = t.image; }
+    | t = <STRING>          { s = t.image; }
+    | [ "-"                 { sign = "-"; } ] t = <NUMBER>  { s = sign + t.image; }
+  )                         { return s; }
 }
 
 String typeArgs() :         { String s; String r; }

@@ -177,10 +177,35 @@ public class TypeCheckTest extends TestCase {
         assertProblems(3, check(mas, "v(3, \"G\", nao)."));
     }
 
+    public void testStructEnum() {
+        String decls = "{ type(canto = [pos(0,0), pos(0,9), pos(9,0), pos(9,9)], alvo(canto)) } ";
+        assertTrue(check(decls + "alvo(pos(0,0)). alvo(pos(9,9)).").isOk());
+        assertHasProblem("esperado canto (pos(0,0), pos(0,9), pos(9,0), pos(9,9)), encontrado pos(5,5)", check(decls + "alvo(pos(5,5))."));
+        assertHasProblem("esperado canto, encontrado a estrutura ponto(1)", check(decls + "alvo(ponto(1))."));
+        assertHasProblem("esperado canto, encontrado atom", check(decls + "alvo(forno)."));
+        // com variáveis dentro: não dá para saber
+        assertTrue(check(decls + "+!x : posicao(X, Y) <- +alvo(pos(X, Y)).").isOk());
+        // valor que passa por variável
+        assertHasProblem("encontrado pos(5,5)", check(decls + "+!x <- P = pos(5,5); +alvo(P)."));
+        assertTrue(check(decls + "+!x <- P = pos(0,9); +alvo(P).").isOk());
+        // um canto também é um pos
+        assertTrue(check(decls + "{ type(pos(number, number), atual(pos)) } +!x : alvo(P) <- +atual(P).").isOk());
+        // os valores são conferidos contra a declaração de pos
+        assertHasProblem("argumento 2: esperado number, encontrado string", check("{ type(pos(number, number), canto = [pos(0, \"a\")]) }"));
+    }
+
+    public void testStructEnumInMas2j() throws Exception {
+        String mas = "MAS m { agents: a; types { canto = [pos(0,0), pos(-1,9)]; alvo(canto); } }";
+        assertTrue(check(mas, "alvo(pos(-1,9)).").isOk());
+        assertProblems(1, check(mas, "alvo(pos(1,9))."));
+    }
+
     public void testInvalidEnumDeclarations() {
         assertHasProblem("tipo enumerado inválido", check("{ type(cor = [amarela, 3]) }"));       // misturado
         assertHasProblem("tipo enumerado inválido", check("{ type(cor = [1, \"a\"]) }"));         // misturado
-        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [f(1)]) }"));             // estrutura
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [f(1), g(2)]) }"));       // estruturas diferentes
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [f(1), a]) }"));          // misturado
+        assertHasProblem("tipo enumerado inválido", check("{ type(cor = [f(X)]) }"));             // estrutura com variável
         assertHasProblem("tipo enumerado inválido", check("{ type(cor = [X]) }"));                // variável
         assertHasProblem("tipo enumerado inválido", check("{ type(cor = []) }"));
         assertHasProblem("tipo enumerado inválido", check("{ type(number = [a]) }"));

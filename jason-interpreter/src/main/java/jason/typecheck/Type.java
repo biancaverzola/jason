@@ -15,8 +15,9 @@ import jason.asSyntax.Term;
  *  - list(T): lista cujos elementos são do tipo T
  *  - nome de um predicado declarado (ex.: pos, quando existe a declaração pos(number, number))
  *  - nome de um tipo enumerado: só aceita os valores listados, que são todos átomos,
- *    todos números ou todos strings, ex.: cor = [amarela, azul], nota = [1, 2, 3],
- *    tamanho = ["P", "M", "G"]
+ *    todos números, todos strings ou todos estruturas com o mesmo nome (sem variáveis),
+ *    ex.: cor = [amarela, azul], nota = [1, 2, 3], tamanho = ["P", "M", "G"],
+ *    canto = [pos(0,0), pos(9,9)]
  */
 public final class Type {
 
@@ -33,9 +34,9 @@ public final class Type {
     private final String structName; // só para STRUCT e ENUM (o nome do tipo)
     private final Type   elemType;   // só para list(T)
     private final List<String> enumValues; // só para ENUM: os valores aceitos (como texto, ver enumKey)
-    private final Kind   enumBase;   // só para ENUM: ATOM, NUMBER ou STRING (o tipo dos valores)
+    private final Type   enumBase;   // só para ENUM: o tipo dos valores (atom, number, string ou a estrutura, ex.: pos)
 
-    private Type(Kind kind, String structName, Type elemType, List<String> enumValues, Kind enumBase) {
+    private Type(Kind kind, String structName, Type elemType, List<String> enumValues, Type enumBase) {
         this.kind       = kind;
         this.structName = structName;
         this.elemType   = elemType;
@@ -53,24 +54,29 @@ public final class Type {
 
     /**
      * tipo enumerado, ex.: cor = [amarela, azul]
-     * @param base   o tipo dos valores: ATOM, NUMBER ou STRING
+     * @param base   o tipo dos valores: atom, number, string ou uma estrutura (ex.: pos)
      * @param values os valores, como texto (ver enumKey)
      */
-    public static Type enumOf(String name, Kind base, List<String> values) {
+    public static Type enumOf(String name, Type base, List<String> values) {
         return new Type(Kind.ENUM, name, null, List.copyOf(values), base);
     }
 
     /**
      * O texto usado para comparar um valor com os valores de um enumerado:
-     * amarela, 3, 2.5, -1, "P". Retorna null se o termo não pode ser valor de enumerado.
+     * amarela, 3, 2.5, -1, "P", pos(0,0). Retorna null se o termo não pode ser valor de enumerado.
      */
     public static String enumKey(Term t) {
         if (t.isNumeric() && !t.isArithExpr())
             return t.toString();
         if (t.isString())
             return t.toString();
-        if (t.isLiteral() && !t.isVar() && ((Literal) t).getArity() == 0 && !t.isList())
-            return ((Literal) t).getFunctor();
+        if (t.isLiteral() && !t.isVar() && !t.isList() && !t.isArithExpr()) {
+            Literal l = (Literal) t;
+            if (l.getArity() == 0)
+                return l.getFunctor();
+            if (t.isGround() && !l.hasAnnot() && !l.negated())   // estrutura sem variáveis, ex.: pos(0,0)
+                return l.toString();
+        }
         return null;
     }
 
@@ -86,8 +92,8 @@ public final class Type {
 
     /** os valores aceitos por um tipo enumerado */
     public List<String> getEnumValues() { return enumValues; }
-    /** o tipo dos valores de um enumerado: ATOM, NUMBER ou STRING */
-    public Kind getEnumBase() { return enumBase; }
+    /** o tipo dos valores de um enumerado: atom, number, string ou uma estrutura (ex.: pos) */
+    public Type getEnumBase() { return enumBase; }
 
     /** ex.: "cor (amarela, azul, vermelha)", para as mensagens */
     public String describeEnum() {
@@ -136,17 +142,17 @@ public final class Type {
             case ATOM:
                 // true e false são átomos em Jason; os valores de um enumerado de átomos também
                 return actual.kind == Kind.ATOM || actual.kind == Kind.BOOLEAN
-                    || (actual.kind == Kind.ENUM && actual.enumBase == Kind.ATOM);
+                    || (actual.kind == Kind.ENUM && actual.enumBase.kind == Kind.ATOM);
             case NUMBER:
             case STRING:
                 // um valor de nota = [1, 2, 3] é um number; de tamanho = ["P", "M"], uma string
-                return actual.kind == expected.kind || (actual.kind == Kind.ENUM && actual.enumBase == expected.kind);
+                return actual.kind == expected.kind || (actual.kind == Kind.ENUM && actual.enumBase.kind == expected.kind);
             case ENUM:
                 // um valor qualquer do tipo base é aceito aqui: QUAL valor é conferido onde ele
                 // está escrito (ver TypeChecker.checkEnumValue), não pelo tipo
                 if (actual.kind == Kind.ENUM)
                     return expected.structName.equals(actual.structName);
-                return accepts(expected.base(), actual);
+                return accepts(expected.enumBase, actual);
             case BOOLEAN:
                 return actual.kind == Kind.BOOLEAN;
             case LIST:
@@ -156,18 +162,12 @@ public final class Type {
                     return true;
                 return accepts(expected.elemType, actual.elemType);
             case STRUCT:
+                // um valor de canto = [pos(0,0), pos(9,9)] também é um pos
+                if (actual.kind == Kind.ENUM)
+                    return accepts(expected, actual.enumBase);
                 return actual.kind == Kind.STRUCT && expected.structName.equals(actual.structName);
             default:
                 return expected.kind == actual.kind;
-        }
-    }
-
-    /** o tipo dos valores de um enumerado, como Type (ex.: nota -> number) */
-    Type base() {
-        switch (enumBase) {
-            case NUMBER: return NUMBER;
-            case STRING: return STRING;
-            default:     return ATOM;
         }
     }
 
@@ -215,7 +215,7 @@ public final class Type {
         if (!(o instanceof Type)) return false;
         Type t = (Type) o;
         return kind == t.kind && Objects.equals(structName, t.structName) && Objects.equals(elemType, t.elemType)
-            && Objects.equals(enumValues, t.enumValues) && enumBase == t.enumBase;
+            && Objects.equals(enumValues, t.enumValues) && Objects.equals(enumBase, t.enumBase);
     }
 
     @Override
