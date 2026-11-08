@@ -73,6 +73,10 @@ public class TypeChecker {
     private static class VarInfo {
         Type   type;
         String origin; // ex.: "temperatura/2, linha 18"
+        // a lista escrita no código que a variável recebeu (ex.: L = [1, "a"]), guardada para
+        // conferir os elementos quando a variável for usada onde se espera list(T)
+        ListTerm list;
+        String   listOrigin;
         VarInfo(Type type, String origin) {
             this.type   = type;
             this.origin = origin;
@@ -213,7 +217,7 @@ public class TypeChecker {
 
         if (t.isVar()) {
             if (!expected.isAny())
-                constrainVar((VarTerm) t, expected, s, c, pos, originOf(d, pos, c), d == null ? null : table.describeOrigin(d));
+                constrainVar((VarTerm) t, expected, s, c, pos, originOf(d, pos, c), d);
             return;
         }
 
@@ -281,7 +285,7 @@ public class TypeChecker {
         }
         VarTerm tail = lt.getTail(); // [H|T]: T também é uma lista do mesmo tipo
         if (tail != null && !tail.isUnnamedVar() && expected.isList())
-            constrainVar(tail, expected, s, c, pos + ", resto da lista", originOf(d, pos, c), d == null ? null : table.describeOrigin(d));
+            constrainVar(tail, expected, s, c, pos + ", resto da lista", originOf(d, pos, c), d);
     }
 
     // ------------------------------------------------------------------
@@ -329,6 +333,14 @@ public class TypeChecker {
                 break;
             }
             case eq: case unify: { // == e =  : os dois lados têm o mesmo tipo
+                if (isNamedVar(lhs) && rhs.isList()) {         // ex.: L = [1, "a"]
+                    bindList((VarTerm) lhs, (ListTerm) rhs, s, c, where);
+                    break;
+                }
+                if (isNamedVar(rhs) && lhs.isList()) {         // ex.: [1, "a"] = L
+                    bindList((VarTerm) rhs, (ListTerm) lhs, s, c, where);
+                    break;
+                }
                 Type tl = typeOf(lhs, s);
                 Type tr = typeOf(rhs, s);
                 if (lhs.isVar() && !lhs.isUnnamedVar() && !tr.isAny()) {
@@ -342,6 +354,32 @@ public class TypeChecker {
             }
             default:
                 break; // \== e =.. : nada a deduzir
+        }
+    }
+
+    private static boolean isNamedVar(Term t) {
+        return t != null && t.isVar() && !t.isUnnamedVar();
+    }
+
+    /**
+     * A variável v recebe a lista lt escrita no código (ex.: L = [1, "a"]).
+     * Se v já é list(T), os elementos são conferidos agora. Senão, v passa a ser uma
+     * lista e a lista é guardada, para conferir os elementos quando v for usada onde
+     * se espera list(T) (ver constrainVar).
+     */
+    private void bindList(VarTerm v, ListTerm lt, Scope s, Ctx c, String where) {
+        String name = v.getFunctor();
+        VarInfo info = s.vars.get(name);
+        if (info != null && info.type.isList() && info.type.getElemType() != null) {
+            checkList(lt, info.type, s, c, null, where + " (" + name + " vem de " + info.origin + ")");
+            return;
+        }
+        String origin = where + ", linha " + c.line;
+        constrainVar(v, Type.LIST, s, c, where, origin, null);
+        info = s.vars.get(name);
+        if (info.type.isList() && info.type.getElemType() == null) {
+            info.list       = lt;
+            info.listOrigin = origin;
         }
     }
 
@@ -364,14 +402,21 @@ public class TypeChecker {
      * Se ela ainda não tem tipo, passa a ter. Se já tem e é incompatível, é um erro.
      *
      * @param origin    de onde vem essa informação, para mensagens futuras (ex.: "temperatura/2, linha 18")
-     * @param declOrigin onde está a declaração usada aqui (ou null)
+     * @param d         a declaração usada aqui (ou null)
      */
-    private void constrainVar(VarTerm v, Type t, Scope s, Ctx c, String pos, String origin, String declOrigin) {
+    private void constrainVar(VarTerm v, Type t, Scope s, Ctx c, String pos, String origin, TypeDecl d) {
+        String declOrigin = d == null ? null : table.describeOrigin(d);
         String name = v.getFunctor();
         VarInfo info = s.vars.get(name);
         if (info == null) {
             s.vars.put(name, new VarInfo(t, origin));
         } else if (Type.compatible(info.type, t)) {
+            if (info.list != null && t.isList() && t.getElemType() != null) {
+                // ex.: L = [1, "a"]; +notas(L): confere os elementos da lista que L recebeu
+                ListTerm lt = info.list;
+                info.list = null;
+                checkList(lt, t, s, c, d, pos + " (" + name + " vem de " + info.listOrigin + ")");
+            }
             if (info.type.isAny())
                 info.origin = origin;
             info.type = Type.moreSpecific(info.type, t);

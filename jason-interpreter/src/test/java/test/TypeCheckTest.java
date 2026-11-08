@@ -99,6 +99,24 @@ public class TypeCheckTest extends TestCase {
         assertHasProblem("elemento 2: esperado pos, encontrado atom", check(decls + "caminho([pos(1,2), forno])."));
     }
 
+    public void testListThroughVariable() {
+        // a lista passa por uma variável antes de ser usada: os elementos continuam sendo conferidos
+        String decls = "{ type(notas(list(number))) } ";
+        TypeCheckReport r = check(decls + "+!d <- L = [1, \"a\"]; +notas(L).");
+        assertProblems(1, r);
+        assertHasProblem("elemento 2: esperado number, encontrado string", r);
+        // ordem inversa: L já é list(number) quando recebe a lista
+        r = check(decls + "+!e <- ?notas(L); L = [1, \"a\"].");
+        assertProblems(1, r);
+        assertHasProblem("elemento 2: esperado number, encontrado string", r);
+        // casos certos
+        assertTrue(check(decls + "+!f <- L = [1, 2]; +notas(L).").isOk());
+        assertTrue(check(decls + "+!g <- L = [1, \"a\"].").isOk());      // L sem declaração: livre
+        assertTrue(check(decls + "+!h <- L = [1, X]; +notas(L); Y = X + 1.").isOk());
+        // a variável de dentro da lista ganha o tipo do elemento
+        assertProblems(1, check("{ type(notas(list(number)), nome(string)) } +!i <- L = [X]; +notas(L); +nome(X)."));
+    }
+
     // ---- declarações inválidas ------------------------------------------
 
     public void testUnknownTypeName() {
