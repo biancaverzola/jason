@@ -10,7 +10,7 @@
 #   opção=valor   as mesmas opções do logging.properties
 #
 # ex.:   ./rodar-jade.sh cozinha
-#        ./rodar-jade.sh cozinha jason.typecheck.onfail=warn
+#        ./rodar-jade.sh cozinha jason.typecheck.onfail=stop
 #        ./rodar-jade.sh criar
 #        ./rodar-jade.sh mensagens            (terminal 1: container principal)
 #        ./rodar-jade.sh mensagens c2         (terminal 2: agente b)

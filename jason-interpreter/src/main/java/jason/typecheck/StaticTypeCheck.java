@@ -38,15 +38,16 @@ import jason.runtime.SourcePath;
  *    e não imprime nada (o Jason se comporta exatamente como antes);
  *  - se há declarações: verifica todos os agentes e imprime
  *    "Verificação estática de tipos [OK]" ou "[FAIL]" com a lista de problemas;
- *  - se der [FAIL], por padrão o sistema não é iniciado.
+ *  - se der [FAIL], por padrão o sistema roda mesmo assim (os erros aparecem como aviso);
+ *    com "jason.typecheck.onfail = stop" o sistema não é iniciado.
  * Além disso, registra as tabelas de tipos para a verificação em execução
  * ({@link RuntimeTypeCheck}).
  *
  * Opções no logging.properties do projeto:
  *     jason.typecheck = false              desliga toda a verificação de tipos (estática e em execução)
  *     jason.typecheck.static = false       desliga só a verificação estática
- *     jason.typecheck.onfail = stop        em caso de [FAIL], não inicia o sistema (padrão)
- *     jason.typecheck.onfail = warn        em caso de [FAIL], só avisa e roda o sistema mesmo assim
+ *     jason.typecheck.onfail = warn        em caso de [FAIL], só avisa e roda o sistema mesmo assim (padrão)
+ *     jason.typecheck.onfail = stop        em caso de [FAIL], não inicia o sistema
  *     jason.typecheck.report = tipos.log   também salva o relatório nesse arquivo
  * (as opções da verificação em execução estão em RuntimeTypeCheck)
  */
@@ -78,7 +79,7 @@ public class StaticTypeCheck {
 
     /**
      * Executa a verificação no início da execução.
-     * @return true se o sistema pode ser iniciado; false se deve parar (houve [FAIL] e onfail não é warn)
+     * @return true se o sistema pode ser iniciado; false se deve parar (houve [FAIL] e onfail = stop)
      */
     public static boolean check(MAS2JProject project) {
         try {
@@ -118,10 +119,13 @@ public class StaticTypeCheck {
             return true;
 
         printReport(report);
-        if (!report.isOk() && stopOnFail()) {
-            logger.warning("O sistema não será iniciado por causa dos erros de tipo. "
-                    + "(Para rodar mesmo assim, use '" + PROP_ONFAIL + " = warn' no logging.properties.)");
-            return false;
+        if (!report.isOk()) {
+            if (stopOnFail()) {
+                logger.warning("O sistema não será iniciado por causa dos erros de tipo (" + PROP_ONFAIL + " = stop no logging.properties).");
+                return false;
+            }
+            logger.warning("O sistema vai rodar mesmo assim. (Para não deixar rodar quando há erros de tipo, use '"
+                    + PROP_ONFAIL + " = stop' no logging.properties.)");
         }
         return true;
     }
@@ -129,7 +133,7 @@ public class StaticTypeCheck {
     /**
      * Verifica um agente criado durante a execução (.create_agent), antes de ele ser criado.
      * Se o .asl já foi verificado no início (outro agente usa o mesmo arquivo), não faz nada.
-     * @throws JasonException se houver erros de tipo e onfail não for warn: o agente não é
+     * @throws JasonException se houver erros de tipo e onfail = stop: o agente não é
      *         criado e o .create_agent falha (o plano de quem chamou falha)
      */
     public static void checkCreatedAgent(String agName, String src) throws JasonException {
@@ -163,8 +167,11 @@ public class StaticTypeCheck {
         if (!staticOn)
             return;
         printReport(report);
-        if (!report.isOk() && stopOnFail())
-            throw new JasonException("o agente " + agName + " não foi criado por causa dos erros de tipo");
+        if (!report.isOk()) {
+            if (stopOnFail())
+                throw new JasonException("o agente " + agName + " não foi criado por causa dos erros de tipo");
+            logger.warning("O agente " + agName + " vai ser criado mesmo assim.");
+        }
     }
 
     /**
@@ -237,7 +244,8 @@ public class StaticTypeCheck {
     }
 
     private static boolean stopOnFail() {
-        return !"warn".equalsIgnoreCase(property(PROP_ONFAIL));
+        String v = property(PROP_ONFAIL);
+        return v != null && "stop".equalsIgnoreCase(v.trim()); // padrão: warn (avisa e roda)
     }
 
     private static boolean isOff(String prop) {
