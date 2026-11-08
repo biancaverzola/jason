@@ -43,7 +43,13 @@ public class RuntimeBeliefCheckTest extends TestCase {
         "+!vai_certo <- X = 9; !mira(pos(X, X)); jason.asunit.print(ok). " +
         "+!mira(P) <- jason.asunit.print(mirando, \" \", P). " +
         "-!vai[error(E)] <- jason.asunit.print(falhou, \" \", E). " +
-        "-!vai2[error(E)] <- jason.asunit.print(falhou, \" \", E). ";
+        "-!vai2[error(E)] <- jason.asunit.print(falhou, \" \", E). " +
+        "+!rem <- X = 5; -alvo(pos(X, X)); jason.asunit.print(continuei). " +
+        "-!rem[error(E)] <- jason.asunit.print(falhou, \" \", E). " +
+        "+!troca <- X = 5; -+alvo(pos(X, X)); jason.asunit.print(continuei). " +
+        "-!troca[error(E)] <- jason.asunit.print(falhou, \" \", E). " +
+        "+!pergunta <- X = 5; ?alvo(pos(X, X)); jason.asunit.print(continuei). " +
+        "-!pergunta[error(E)] <- jason.asunit.print(falhou, \" \", E). ";
 
     public void testWarnIsDefault() {
         TestAgent ag = new TestAgent("robo");
@@ -121,6 +127,76 @@ public class RuntimeBeliefCheckTest extends TestCase {
         assertNull(RuntimeTypeCheck.checkGoal(ag.getTS(), ASSyntax.parseLiteral("mira(pos(5,5))[source(bob)]"), null));
         assertNotNull(RuntimeTypeCheck.checkBelief(ag.getTS(), ASSyntax.parseLiteral("alvo(pos(5,5))[source(self)]"), null));
         assertNotNull(RuntimeTypeCheck.checkGoal(ag.getTS(), ASSyntax.parseLiteral("mira(pos(5,5))[source(self)]"), null));
+    }
+
+    public void testRemoval() throws Exception {
+        TestAgent ag = new TestAgent("robo");
+        ag.parseAScode(CODE);
+        ag.addGoal("rem");
+        ag.assertPrint("continuei", 10);          // padrão: avisa e remove (não acha nada)
+        options("jason.typecheck.beliefs.onfail = fail");
+        TestAgent ag2 = new TestAgent("robo2");
+        ag2.parseAScode(CODE);
+        ag2.addGoal("rem");
+        ag2.assertPrint("falhou type_error", 10);
+    }
+
+    public void testDelAddKeepsOldBeliefOnFail() throws Exception {
+        options("jason.typecheck.beliefs.onfail = fail");
+        TestAgent ag = new TestAgent("robo");
+        ag.parseAScode("alvo(pos(0,0)). " + CODE);
+        ag.addGoal("troca");
+        ag.assertPrint("falhou type_error", 10);
+        ag.assertBel("alvo(pos(0,0))", 1);         // a antiga NÃO foi removida
+        ag.assertBel("not alvo(pos(5,5))", 1);
+    }
+
+    public void testQuery() throws Exception {
+        TestAgent ag = new TestAgent("robo");
+        ag.parseAScode(CODE);
+        ag.addGoal("pergunta");
+        ag.assertPrint("falhou test_goal_failed", 10); // padrão: avisa, consulta e não acha (falha normal do Jason)
+        options("jason.typecheck.goals.onfail = fail");
+        TestAgent ag2 = new TestAgent("robo2");
+        ag2.parseAScode(CODE);
+        ag2.addGoal("pergunta");
+        ag2.assertPrint("falhou type_error", 10);  // fail: falha por tipo, sem consultar
+    }
+
+    private static final String ASK =
+        "+!perg <- .send(maria, askOne, alvo(_), R); jason.asunit.print(resposta, \" \", R). " +
+        "-!perg[error(E)] <- jason.asunit.print(falhou, \" \", E). ";
+
+    public void testAskAnswerWarn() {
+        TestAgent bob = new TestAgent("bob"), maria = new TestAgent("maria");
+        bob.parseAScode(ASK);
+        maria.parseAScode("alvo(pos(5,5)).");     // maria responde com um valor que não é canto
+        bob.addGoal("perg");
+        bob.assertIdle(10);
+        maria.assertIdle(10);
+        bob.assertPrint("resposta alvo(pos(5,5))", 10); // padrão: avisa e aceita
+    }
+
+    public void testAskAnswerReject() throws Exception {
+        options("jason.typecheck.runtime.onfail = reject");
+        TestAgent bob = new TestAgent("bob"), maria = new TestAgent("maria");
+        bob.parseAScode(ASK);
+        maria.parseAScode("alvo(pos(5,5)).");
+        bob.addGoal("perg");
+        bob.assertIdle(10);
+        maria.assertIdle(10);
+        bob.assertPrint("falhou type_error", 10);  // o plano que perguntou falha
+    }
+
+    public void testAskAnswerCorrect() throws Exception {
+        options("jason.typecheck.runtime.onfail = reject");
+        TestAgent bob = new TestAgent("bob"), maria = new TestAgent("maria");
+        bob.parseAScode(ASK);
+        maria.parseAScode("alvo(pos(9,9)).");
+        bob.addGoal("perg");
+        bob.assertIdle(10);
+        maria.assertIdle(10);
+        bob.assertPrint("resposta alvo(pos(9,9))", 10);
     }
 
     public void testPercept() throws Exception {

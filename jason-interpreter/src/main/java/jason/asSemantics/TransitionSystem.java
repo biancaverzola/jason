@@ -282,8 +282,15 @@ public class TransitionSystem implements Serializable {
             if (m.getInReplyTo() != null) {
                 intention = getC().getPendingIntentions().get(m.getInReplyTo());
             }
+            // checks the types of the answer of an ask (see jason.typecheck)
+            String answerTypeError = intention == null ? null :
+                    jason.typecheck.RuntimeTypeCheck.checkAnswer(this, m, content, (Structure)intention.peek().getCurrentStep().getBodyTerm());
+            if (answerTypeError != null) {
+                Intention ai = getC().removePendingIntention(m.getInReplyTo());
+                ai.peek().removeCurrentStep(); // removes the .send in the plan body
+                generateGoalDeletion(ai, JasonException.createBasicErrorAnnots("type_error", answerTypeError), ASSyntax.createAtom("type_error"));
             // is it a pending intention?
-            if (intention != null) {
+            } else if (intention != null) {
                 // unify the message answer with the .send fourth argument.
                 // the .send that put the intention in Pending state was
                 // something like
@@ -1034,6 +1041,13 @@ public class TransitionSystem implements Serializable {
         // Rule Test
         case test:
             LogicalFormula f = (LogicalFormula)bTerm;
+            if (f.isLiteral() && !(f instanceof BinaryStructure) && f.capply(u) instanceof Literal ql) { // checks the types of the query (see jason.typecheck)
+                String queryTypeError = jason.typecheck.RuntimeTypeCheck.checkQuery(this, ql, curInt);
+                if (queryTypeError != null) {
+                    generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", queryTypeError), ASSyntax.createAtom("type_error"));
+                    break;
+                }
+            }
             if (ag.believes(f, u)) {
                 removeActionReQueue(curInt);
             } else {
@@ -1061,6 +1075,12 @@ public class TransitionSystem implements Serializable {
 
 
         case delAddBel:
+            // checks the types of the new belief BEFORE removing the old one (see jason.typecheck)
+            String delAddTypeError = body.capply(u) instanceof Literal newBel ? jason.typecheck.RuntimeTypeCheck.checkBelief(this, newBel, curInt) : null;
+            if (delAddTypeError != null) {
+                generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", delAddTypeError), ASSyntax.createAtom("type_error"));
+                break;
+            }
             // -+a(1,X) ===> remove a(_,_), add a(1,X)
             // change all vars to anon vars to remove it
             Literal b2 = prepareBodyForEvent(body, u, curInt.peek());
@@ -1097,8 +1117,8 @@ public class TransitionSystem implements Serializable {
                 body = prepareBodyForEvent(body, u, null);
             }
 
-            // checks the types of the belief (see jason.typecheck)
-            String typeError = jason.typecheck.RuntimeTypeCheck.checkBelief(this, body, curInt);
+            // checks the types of the belief (see jason.typecheck); -+ was already checked above
+            String typeError = h.getBodyType() == BodyType.delAddBel ? null : jason.typecheck.RuntimeTypeCheck.checkBelief(this, body, curInt);
             if (typeError != null) {
                 generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", typeError), ASSyntax.createAtom("type_error"));
                 break;
@@ -1134,6 +1154,12 @@ public class TransitionSystem implements Serializable {
                 body = prepareBodyForEvent(body, u, newfocus.peek());
             } else {
                 body = prepareBodyForEvent(body, u, null);
+            }
+            // checks the types of the belief to remove (see jason.typecheck)
+            String delTypeError = jason.typecheck.RuntimeTypeCheck.checkBelief(this, body, curInt, false);
+            if (delTypeError != null) {
+                generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", delTypeError), ASSyntax.createAtom("type_error"));
+                break;
             }
             // call BRF
             try {

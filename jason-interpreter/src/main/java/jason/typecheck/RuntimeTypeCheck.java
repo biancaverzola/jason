@@ -30,9 +30,10 @@ import jason.bb.BeliefBase;
 import jason.util.Config;
 
 /**
- * Verificação de tipos DURANTE A EXECUÇÃO: nas mensagens recebidas pelos agentes, nas
- * crenças adicionadas pelos planos (+crença, -+crença), nas percepções do ambiente e nos
- * objetivos criados pelos planos (!objetivo, !!objetivo).
+ * Verificação de tipos DURANTE A EXECUÇÃO: nas mensagens recebidas pelos agentes (e nas
+ * respostas de askOne/askAll), nas crenças adicionadas e removidas pelos planos
+ * (+crença, -crença, -+crença), nas percepções do ambiente, nos objetivos criados pelos
+ * planos (!objetivo, !!objetivo) e nas consultas (?consulta).
  *
  * A verificação estática não consegue ver o que só existe durante a execução:
  *  - .send(X, tell, ...) com o destinatário X decidido durante a execução
@@ -53,16 +54,24 @@ import jason.util.Config;
  *
  * Crenças adicionadas pelos planos e percepções (valores que só existem durante a
  * execução, ex.: +alvo(pos(X, Y)) com X = 5, ou uma percepção vinda do ambiente Java):
- *     jason.typecheck.beliefs.onfail = warn     avisa e adiciona mesmo assim (padrão)
- *     jason.typecheck.beliefs.onfail = fail     o +crença falha (o plano falha com
- *                                               error(type_error)); a percepção é descartada
+ *     jason.typecheck.beliefs.onfail = warn     avisa e adiciona/remove mesmo assim (padrão)
+ *     jason.typecheck.beliefs.onfail = fail     o +crença / -crença / -+crença falha (o plano
+ *                                               falha com error(type_error)); a percepção é
+ *                                               descartada
  *     jason.typecheck.beliefs = false           desliga a verificação de crenças e percepções
+ * (no -+crença, a crença nova é conferida ANTES de a antiga ser removida)
  *
- * Objetivos criados pelos planos (!objetivo, !!objetivo):
- *     jason.typecheck.goals.onfail = warn       avisa e cria o objetivo mesmo assim (padrão)
- *     jason.typecheck.goals.onfail = fail       o objetivo não é criado e o plano falha
- *                                               com error(type_error)
- *     jason.typecheck.goals = false             desliga a verificação de objetivos
+ * Respostas de askOne / askAll (conferidas com a tabela de QUEM PERGUNTOU), seguem a
+ * opção das mensagens (jason.typecheck.runtime.onfail):
+ *     warn (padrão)       avisa e aceita a resposta
+ *     reject ou fail      avisa e o plano que perguntou falha com error(type_error)
+ *
+ * Objetivos criados pelos planos (!objetivo, !!objetivo) e consultas (?consulta, que no
+ * Jason são "test goals"):
+ *     jason.typecheck.goals.onfail = warn       avisa e cria o objetivo / faz a consulta (padrão)
+ *     jason.typecheck.goals.onfail = fail       o objetivo não é criado / a consulta não é feita,
+ *                                               e o plano falha com error(type_error)
+ *     jason.typecheck.goals = false             desliga a verificação de objetivos e consultas
  *
  * Não entram aqui: crenças e objetivos iniciais (já conferidos pela verificação estática)
  * e crenças e objetivos que vêm de mensagens tell / achieve (o Jason os adiciona com um
@@ -165,15 +174,27 @@ public class RuntimeTypeCheck {
      *         (só com jason.typecheck.goals.onfail = fail)
      */
     public static String checkGoal(TransitionSystem ts, Literal goal, Intention i) {
+        return checkGoal(ts, goal, i, false);
+    }
+
+    /**
+     * Chamado pelo TransitionSystem antes de uma consulta (?consulta).
+     * @return null se a consulta pode ser feita; a mensagem de erro se o plano deve falhar
+     */
+    public static String checkQuery(TransitionSystem ts, Literal query, Intention i) {
+        return checkGoal(ts, query, i, true);
+    }
+
+    private static String checkGoal(TransitionSystem ts, Literal goal, Intention i, boolean query) {
         try {
-            return doCheckGoal(ts, goal, i);
+            return doCheckGoal(ts, goal, i, query);
         } catch (RuntimeException e) {
             StaticTypeCheck.internalError(e);
             return null;
         }
     }
 
-    private static String doCheckGoal(TransitionSystem ts, Literal goal, Intention i) {
+    private static String doCheckGoal(TransitionSystem ts, Literal goal, Intention i, boolean query) {
         if (!goalsEnabled() || fromMessage(goal))
             return null;
         TypeTable table = tableFor(ts.getAg());
@@ -183,8 +204,46 @@ public class RuntimeTypeCheck {
         if (report.isOk())
             return null;
         boolean fail = failOnBadGoal();
-        warn(ts.getAgArch().getAgName() + " criou um objetivo com tipo errado ("
-                + (fail ? "o objetivo não foi criado e o plano falhou" : "objetivo criado mesmo assim") + ")", report);
+        if (query)
+            warn(ts.getAgArch().getAgName() + " fez uma consulta com tipo errado ("
+                    + (fail ? "a consulta não foi feita e o plano falhou" : "consulta feita mesmo assim") + ")", report);
+        else
+            warn(ts.getAgArch().getAgName() + " criou um objetivo com tipo errado ("
+                    + (fail ? "o objetivo não foi criado e o plano falhou" : "objetivo criado mesmo assim") + ")", report);
+        return fail ? report.getProblems().get(0).getMessage() : null;
+    }
+
+    /**
+     * Chamado pelo TransitionSystem quando chega a resposta de um askOne / askAll, antes de
+     * ela ser entregue ao plano que perguntou. Confere com a tabela de QUEM PERGUNTOU.
+     * @param send o .send(Destino, askOne, Pergunta, Resposta) do plano que perguntou
+     * @return null se a resposta pode ser entregue; a mensagem de erro se o plano que
+     *         perguntou deve falhar (runtime.onfail = reject ou fail)
+     */
+    public static String checkAnswer(TransitionSystem ts, Message m, Term content, jason.asSyntax.Structure send) {
+        try {
+            return doCheckAnswer(ts, m, content, send);
+        } catch (RuntimeException e) {
+            StaticTypeCheck.internalError(e);
+            return null;
+        }
+    }
+
+    private static String doCheckAnswer(TransitionSystem ts, Message m, Term content, jason.asSyntax.Structure send) {
+        if (!isEnabled() || send == null || send.getArity() < 2)
+            return null;
+        String ask = send.getTerm(1).toString();
+        if (!ask.equals("askOne") && !ask.equals("askAll"))
+            return null; // askHow: a resposta são planos
+        TypeTable table = tableFor(ts.getAg());
+        if (table.isEmpty())
+            return null;
+        TypeCheckReport report = checkContent(table, content, "resposta de " + ask + " de " + m.getSender());
+        if (report.isOk())
+            return null;
+        boolean fail = getOnFail() != OnFail.WARN;
+        warn(ts.getAgArch().getAgName() + " recebeu uma resposta com tipo errado ("
+                + (fail ? "resposta recusada; o plano que perguntou falhou" : "resposta aceita mesmo assim") + ")", report);
         return fail ? report.getProblems().get(0).getMessage() : null;
     }
 
@@ -194,15 +253,22 @@ public class RuntimeTypeCheck {
      *         (só com jason.typecheck.beliefs.onfail = fail)
      */
     public static String checkBelief(TransitionSystem ts, Literal bel, Intention i) {
+        return checkBelief(ts, bel, i, true);
+    }
+
+    /**
+     * @param adding true para +crença / -+crença; false para -crença (remoção)
+     */
+    public static String checkBelief(TransitionSystem ts, Literal bel, Intention i, boolean adding) {
         try {
-            return doCheckBelief(ts, bel, i);
+            return doCheckBelief(ts, bel, i, adding);
         } catch (RuntimeException e) {
             StaticTypeCheck.internalError(e);
             return null;
         }
     }
 
-    private static String doCheckBelief(TransitionSystem ts, Literal bel, Intention i) {
+    private static String doCheckBelief(TransitionSystem ts, Literal bel, Intention i, boolean adding) {
         if (!beliefsEnabled() || fromMessage(bel))
             return null;
         TypeTable table = tableFor(ts.getAg());
@@ -212,8 +278,12 @@ public class RuntimeTypeCheck {
         if (report.isOk())
             return null;
         boolean fail = failOnBadBelief();
-        warn(ts.getAgArch().getAgName() + " adicionou uma crença com tipo errado ("
-                + (fail ? "a crença não foi adicionada e o plano falhou" : "crença adicionada mesmo assim") + ")", report);
+        if (adding)
+            warn(ts.getAgArch().getAgName() + " adicionou uma crença com tipo errado ("
+                    + (fail ? "a crença não foi adicionada e o plano falhou" : "crença adicionada mesmo assim") + ")", report);
+        else
+            warn(ts.getAgArch().getAgName() + " tentou remover uma crença com tipo errado ("
+                    + (fail ? "nada foi removido e o plano falhou" : "remoção feita mesmo assim") + ")", report);
         return fail ? report.getProblems().get(0).getMessage() : null;
     }
 
