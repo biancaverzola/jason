@@ -1,10 +1,5 @@
 package jason.typecheck;
 
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -94,12 +89,6 @@ public class TypeCheckReport {
         for (Problem p : problems)
             s.append("\n").append(p);
         return s.toString();
-    }
-
-    public void writeToFile(String fileName) throws IOException {
-        try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(Paths.get(fileName), StandardCharsets.UTF_8))) {
-            out.print(format());
-        }
     }
 
     /** "file:/home/x/proj/bob.asl" -> "bob.asl" */

@@ -52,15 +52,19 @@ import jason.runtime.SourcePath;
  *     jason.typecheck.static = false       desliga só a verificação estática
  *     jason.typecheck.onfail = warn        em caso de [FAIL], só avisa e roda o sistema mesmo assim (padrão)
  *     jason.typecheck.onfail = stop        em caso de [FAIL], não inicia o sistema
- *     jason.typecheck.report = tipos.log   também salva o relatório nesse arquivo
  * (as opções da verificação em execução estão em RuntimeTypeCheck)
+ *
+ * As mensagens saem pelo logger "jason.typecheck.TypeCheck". Para salvar só elas num
+ * arquivo, basta configurar esse logger no próprio logging.properties (mecanismo padrão
+ * do Java), ex.:
+ *     jason.typecheck.TypeCheck.handlers = java.util.logging.FileHandler
+ *     java.util.logging.FileHandler.pattern = tipos.log
  */
 public class StaticTypeCheck {
 
     public static final String PROP_ENABLED = "jason.typecheck";
     public static final String PROP_STATIC  = "jason.typecheck.static";
     public static final String PROP_ONFAIL  = "jason.typecheck.onfail";
-    public static final String PROP_REPORT  = "jason.typecheck.report";
 
     // o nome do logger aparece entre colchetes na saída: [TypeCheck] ...
     private static final Logger logger = Logger.getLogger("jason.typecheck.TypeCheck");
@@ -231,15 +235,6 @@ public class StaticTypeCheck {
             logger.info(report.format());
         else
             logger.warning(report.format());
-
-        String reportFile = property(PROP_REPORT);
-        if (reportFile != null && !reportFile.isBlank()) {
-            try {
-                report.writeToFile(reportFile.trim());
-            } catch (IOException e) {
-                logger.warning("não foi possível salvar o relatório em " + reportFile + ": " + e.getMessage());
-            }
-        }
     }
 
     /**
