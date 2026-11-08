@@ -213,6 +213,26 @@ public class TypeCheckTest extends TestCase {
         assertHasProblem("tipo enumerado e como predicado", check("{ type(cor = [a], cor(atom)) }"));
     }
 
+    public void testComparisonsOption() throws Exception {
+        String decls = "{ type(temperatura(atom, number), nome(string), cor = [amarela, azul], mochila(cor)) } ";
+        String code = decls
+            + "+!a <- \"alta\" > 180 & 5 == \"a\". "
+            + "+!b : temperatura(F, T) & T > \"abc\" <- true. "
+            + "+!c : mochila(C) & C == azull <- true. ";
+        assertProblems(4, check(code));                    // ligado (padrão)
+        java.util.logging.LogManager lm = java.util.logging.LogManager.getLogManager();
+        try {
+            lm.readConfiguration(new java.io.ByteArrayInputStream("jason.typecheck.comparisons = false".getBytes()));
+            assertTrue(check(code).isOk());                // desligado: nenhuma comparação é conferida
+            // contas e = continuam sendo conferidos
+            assertProblems(1, check(decls + "+!d <- N = \"um\"; X = N * 2."));
+            assertProblems(1, check(decls + "+!e <- X = 5; X = \"a\"."));
+            assertProblems(1, check(decls + "+!f <- C = vermelho; +mochila(C)."));
+        } finally {
+            lm.readConfiguration();
+        }
+    }
+
     public void testListThroughVariable() {
         // a lista passa por uma variável antes de ser usada: os elementos continuam sendo conferidos
         String decls = "{ type(notas(list(number))) } ";

@@ -49,6 +49,17 @@ public class TypeChecker {
     private final TypeTable       table;
     private final TypeCheckReport report;
 
+    /**
+     * jason.typecheck.comparisons = false desliga a conferência de >, <, >=, <= e == entre
+     * tipos diferentes (ex.: "alta" > 180). O Jason permite essas comparações (ordem padrão
+     * entre termos, herdada do Prolog), mas entre número e texto o resultado é sempre o
+     * mesmo, então quase sempre é engano; por isso a conferência fica ligada por padrão.
+     * O = (unificação) e as contas continuam sendo conferidos.
+     */
+    public static final String PROP_COMPARISONS = "jason.typecheck.comparisons";
+    private final boolean checkComparisons =
+            !"false".equalsIgnoreCase(java.util.logging.LogManager.getLogManager().getProperty(PROP_COMPARISONS));
+
     public TypeChecker(TypeTable table, TypeCheckReport report) {
         this.table  = table;
         this.report = report;
@@ -391,6 +402,9 @@ public class TypeChecker {
         // estruturas e expressões dentro da comparação também são verificadas
         checkInside(lhs, s, c);
         checkInside(rhs, s, c);
+
+        if (!checkComparisons && r.getOp() != RelExpr.RelationalOp.unify)
+            return; // jason.typecheck.comparisons = false: só o = (unificação) continua
 
         switch (r.getOp()) {
             case gt: case gte: case lt: case lte: {
