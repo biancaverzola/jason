@@ -1087,6 +1087,13 @@ public class TransitionSystem implements Serializable {
                 body = prepareBodyForEvent(body, u, null);
             }
 
+            // checks the types of the belief (see jason.typecheck)
+            String typeError = jason.typecheck.RuntimeTypeCheck.checkBelief(this, body, curInt);
+            if (typeError != null) {
+                generateGoalDeletion(curInt, JasonException.createBasicErrorAnnots("type_error", typeError), ASSyntax.createAtom("type_error"));
+                break;
+            }
+
             // call BRF
             try {
                 List<Literal>[] result;

@@ -1,7 +1,10 @@
 package jason.typecheck;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.WeakHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -10,12 +13,14 @@ import java.util.logging.Logger;
 
 import jason.asSemantics.Agent;
 import jason.asSemantics.Event;
+import jason.asSemantics.Intention;
 import jason.asSemantics.Message;
 import jason.asSemantics.TransitionSystem;
 import jason.asSyntax.ASSyntax;
 import jason.asSyntax.Atom;
 import jason.asSyntax.Literal;
 import jason.asSyntax.LiteralImpl;
+import jason.asSyntax.SourceInfo;
 import jason.asSyntax.StringTermImpl;
 import jason.asSyntax.Term;
 import jason.asSyntax.Trigger;
@@ -24,7 +29,8 @@ import jason.asSyntax.Trigger.TEType;
 import jason.util.Config;
 
 /**
- * Verificação de tipos DURANTE A EXECUÇÃO, nas mensagens recebidas pelos agentes.
+ * Verificação de tipos DURANTE A EXECUÇÃO: nas mensagens recebidas pelos agentes, nas
+ * crenças adicionadas pelos planos (+crença, -+crença) e nas percepções do ambiente.
  *
  * A verificação estática não consegue ver o que só existe durante a execução:
  *  - .send(X, tell, ...) com o destinatário X decidido durante a execução
@@ -40,7 +46,17 @@ import jason.util.Config;
  *                                               o evento de falha
  *                                               -!kqml_received(Remetente, Tipo, Conteudo, Id)[error(type_error), error_msg("...")]
  *                                               (o agente pode tratar com um plano próprio)
- *     jason.typecheck.runtime = false           desliga esta verificação
+ *     jason.typecheck.runtime = false           desliga toda a verificação em execução
+ *                                               (mensagens, crenças e percepções)
+ *
+ * Crenças adicionadas pelos planos e percepções (valores que só existem durante a
+ * execução, ex.: +alvo(pos(X, Y)) com X = 5, ou uma percepção vinda do ambiente Java):
+ *     jason.typecheck.beliefs.onfail = warn     avisa e adiciona mesmo assim (padrão)
+ *     jason.typecheck.beliefs.onfail = fail     o +crença falha (o plano falha com
+ *                                               error(type_error)); a percepção é descartada
+ *     jason.typecheck.beliefs = false           desliga a verificação de crenças e percepções
+ * (as crenças iniciais não entram aqui: já foram conferidas pela verificação estática;
+ *  as crenças vindas de mensagens tell também não: já foram conferidas quando a mensagem chegou)
  *
  * As tabelas de tipos são registradas pelo {@link StaticTypeCheck} no início da execução
  * (e quando um agente é criado com .create_agent).
@@ -49,6 +65,11 @@ public class RuntimeTypeCheck {
 
     public static final String PROP_RUNTIME = "jason.typecheck.runtime";
     public static final String PROP_ONFAIL  = "jason.typecheck.runtime.onfail";
+    public static final String PROP_BELIEFS = "jason.typecheck.beliefs";
+    public static final String PROP_BELIEFS_ONFAIL = "jason.typecheck.beliefs.onfail";
+
+    /** percepções com erro já avisadas, por agente (para não repetir o aviso a cada ciclo) */
+    private static final java.util.Map<Agent, Set<String>> reportedPercepts = Collections.synchronizedMap(new WeakHashMap<>());
 
     public enum OnFail { REJECT, WARN, FAIL }
 
@@ -100,6 +121,100 @@ public class RuntimeTypeCheck {
             }
         }
         return OnFail.REJECT;
+    }
+
+    public static boolean beliefsEnabled() {
+        return isEnabled() && !"false".equalsIgnoreCase(property(PROP_BELIEFS));
+    }
+
+    static boolean failOnBadBelief() {
+        String v = property(PROP_BELIEFS_ONFAIL);
+        return v != null && "fail".equalsIgnoreCase(v.trim()); // padrão: warn
+    }
+
+    /**
+     * Chamado pelo TransitionSystem quando um plano vai adicionar uma crença (+crença, -+crença).
+     * @return null se a crença pode ser adicionada; a mensagem de erro se o +crença deve falhar
+     *         (só com jason.typecheck.beliefs.onfail = fail)
+     */
+    public static String checkBelief(TransitionSystem ts, Literal bel, Intention i) {
+        try {
+            return doCheckBelief(ts, bel, i);
+        } catch (RuntimeException e) {
+            StaticTypeCheck.internalError(e);
+            return null;
+        }
+    }
+
+    private static String doCheckBelief(TransitionSystem ts, Literal bel, Intention i) {
+        if (!beliefsEnabled())
+            return null;
+        TypeTable table = tableFor(ts.getAg());
+        if (table.isEmpty())
+            return null;
+        TypeCheckReport report = checkContent(table, withoutAnnots(bel), beliefLocation(bel, i));
+        if (report.isOk())
+            return null;
+        boolean fail = failOnBadBelief();
+        warn(ts.getAgArch().getAgName() + " adicionou uma crença com tipo errado ("
+                + (fail ? "a crença não foi adicionada e o plano falhou" : "crença adicionada mesmo assim") + ")", report);
+        return fail ? report.getProblems().get(0).getMessage() : null;
+    }
+
+    /**
+     * Chamado pelo Agent (buf) antes de adicionar uma percepção do ambiente.
+     * @return true se a percepção deve ser adicionada
+     */
+    public static boolean acceptPercept(Agent ag, Literal percept) {
+        try {
+            return doAcceptPercept(ag, percept);
+        } catch (RuntimeException e) {
+            StaticTypeCheck.internalError(e);
+            return true;
+        }
+    }
+
+    private static boolean doAcceptPercept(Agent ag, Literal percept) {
+        if (!beliefsEnabled())
+            return true;
+        TypeTable table = tableFor(ag);
+        if (table.isEmpty())
+            return true;
+        TypeCheckReport report = checkContent(table, withoutAnnots(percept), "percepção do ambiente");
+        if (report.isOk())
+            return true;
+        boolean fail = failOnBadBelief();
+        // com fail, a percepção descartada volta a cada ciclo: avisa só na primeira vez
+        if (reportedPercepts.computeIfAbsent(ag, k -> Collections.synchronizedSet(new HashSet<>())).add(percept.toString())) {
+            String name = ag.getTS() != null ? ag.getTS().getAgArch().getAgName() : "agente";
+            warn(name + " recebeu uma percepção com tipo errado ("
+                    + (fail ? "percepção descartada" : "percepção aceita mesmo assim") + ")", report);
+        }
+        return !fail;
+    }
+
+    /** cópia sem anotações ([source(self)], [source(percept)]), para a mensagem ficar limpa */
+    private static Literal withoutAnnots(Literal l) {
+        Literal c = l.copy();
+        c.clearAnnots();
+        return c;
+    }
+
+    /** onde a crença foi adicionada, ex.: robo.asl:4 (a linha do +crença no plano) */
+    private static String beliefLocation(Literal bel, Intention i) {
+        SourceInfo s = bel.getSrcInfo();
+        if ((s == null || s.getSrcFile() == null) && i != null && !i.isFinished() && i.peek().getPlan() != null)
+            s = i.peek().getPlan().getSrcInfo();
+        if (s == null || s.getSrcFile() == null)
+            return "crença adicionada por um plano";
+        return TypeCheckReport.shortFile(s.getSrcFile()) + (s.getBeginSrcLine() > 0 ? ":" + s.getBeginSrcLine() : "");
+    }
+
+    private static void warn(String header, TypeCheckReport report) {
+        StringBuilder s = new StringBuilder("Verificação de tipos em execução: ").append(header).append("\n");
+        for (TypeCheckReport.Problem p : report.getProblems())
+            s.append("\n").append(p);
+        logger.warning(s.toString());
     }
 
     /**

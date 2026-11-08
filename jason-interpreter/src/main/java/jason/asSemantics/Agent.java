@@ -922,6 +922,7 @@ public class Agent implements Serializable, ToDOM {
             try {
                 Literal lp = lw.getLiteral().copy().forceFullLiteralImpl();
                 lp.addAnnot(BeliefBase.TPercept);
+                if (!jason.typecheck.RuntimeTypeCheck.acceptPercept(this, lp)) continue; // checks the types of the percept (see jason.typecheck)
                 if (getBB().add(lp)) {
                     adds++;
                     ts.updateEvents(new Event(new Trigger(TEOperator.add, TEType.belief, lp)));
