@@ -233,6 +233,27 @@ public class TypeCheckTest extends TestCase {
         }
     }
 
+    public void testForcedWithoutDeclarations() throws Exception {
+        // projeto SEM nenhum tipo declarado
+        java.io.File dir = java.nio.file.Files.createTempDirectory("tipos").toFile();
+        java.nio.file.Files.writeString(new java.io.File(dir, "ag.asl").toPath(), "+!g : \"alta\" > 180 <- true.");
+        java.io.File mas = new java.io.File(dir, "t.mas2j");
+        java.nio.file.Files.writeString(mas.toPath(), "MAS t { agents: ag; }");
+        MAS2JProject project = MAS2JProject.parse(mas.getAbsolutePath());
+        project.getSourcePaths().addPath(dir.getAbsolutePath());   // onde estão os .asl (como faz o RunLocalMAS)
+        project.fixAgentsSrc();
+        java.util.logging.LogManager lm = java.util.logging.LogManager.getLogManager();
+        try {
+            assertNull(StaticTypeCheck.check(project, new TypeCheckReport()));      // sem a opção: não verifica
+            lm.readConfiguration(new java.io.ByteArrayInputStream("jason.typecheck = true".getBytes()));
+            TypeCheckReport r = StaticTypeCheck.check(project, new TypeCheckReport());
+            assertNotNull(r);                                                        // com a opção: verifica
+            assertHasProblem("comparação \"alta\" > 180: esperado number, encontrado string", r);
+        } finally {
+            lm.readConfiguration();
+        }
+    }
+
     public void testListThroughVariable() {
         // a lista passa por uma variável antes de ser usada: os elementos continuam sendo conferidos
         String decls = "{ type(notas(list(number))) } ";

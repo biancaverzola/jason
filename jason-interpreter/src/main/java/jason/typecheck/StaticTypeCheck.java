@@ -45,6 +45,10 @@ import jason.runtime.SourcePath;
  *
  * Opções no logging.properties do projeto:
  *     jason.typecheck = false              desliga toda a verificação de tipos (estática e em execução)
+ *     jason.typecheck = true               verifica SEMPRE, mesmo sem nenhum tipo declarado: confere o
+ *                                          que não precisa de declaração (contas e comparações entre
+ *                                          tipos diferentes, ex.: "alta" > 180). Sem esta linha, a
+ *                                          verificação só roda se houver alguma declaração de tipo.
  *     jason.typecheck.static = false       desliga só a verificação estática
  *     jason.typecheck.onfail = warn        em caso de [FAIL], só avisa e roda o sistema mesmo assim (padrão)
  *     jason.typecheck.onfail = stop        em caso de [FAIL], não inicia o sistema
@@ -103,11 +107,13 @@ public class StaticTypeCheck {
         // Antes de fazer o parse dos agentes, uma busca rápida no texto: se nenhum arquivo
         // tem declaração de tipo, não há nada a verificar. Isso evita qualquer efeito
         // colateral (parse duplicado) em projetos que não usam tipos.
-        if (project.getTypeDecls().isEmpty() && !anyAgentMayHaveTypes(project))
+        // Exceção: com jason.typecheck = true, verifica mesmo sem declarações.
+        boolean forced = isForced();
+        if (!forced && project.getTypeDecls().isEmpty() && !anyAgentMayHaveTypes(project))
             return true;
 
         TypeCheckReport report = new TypeCheckReport();
-        Analysis a = analyse(project, report);
+        Analysis a = analyse(project, report, forced);
         if (!a.anyDecl)
             return true; // havia "type(" no texto, mas nenhuma declaração de verdade (ex.: em comentário)
 
@@ -151,7 +157,7 @@ public class StaticTypeCheck {
         if (!staticOn && !RuntimeTypeCheck.isEnabled())
             return;
         TypeTable global = RuntimeTypeCheck.getGlobal();
-        if (global.isEmpty() && !mayHaveTypes(src, projectPaths, new HashSet<>()))
+        if (global.isEmpty() && !isForced() && !mayHaveTypes(src, projectPaths, new HashSet<>()))
             return;
 
         TypeCheckReport report = new TypeCheckReport();
@@ -160,7 +166,7 @@ public class StaticTypeCheck {
         if (p.agent == null)
             return; // erro de sintaxe: o próprio Jason mostra ao criar o agente
         TypeTable merged = checkParsed(p, global, report);
-        if (merged.isEmpty() && report.isOk())
+        if (merged.isEmpty() && report.isOk() && !isForced())
             return;
         RuntimeTypeCheck.register(src, merged);
 
@@ -180,13 +186,14 @@ public class StaticTypeCheck {
      * (Separado do método acima para poder ser usado pelos testes.)
      */
     public static TypeCheckReport check(MAS2JProject project, TypeCheckReport report) {
-        return analyse(project, report).anyDecl ? report : null;
+        return analyse(project, report, isForced()).anyDecl ? report : null;
     }
 
     /** resultado da análise do projeto: a tabela global, a tabela de cada .asl e se havia declarações */
     private record Analysis(TypeTable global, Map<String, TypeTable> merged, boolean anyDecl) {}
 
-    private static Analysis analyse(MAS2JProject project, TypeCheckReport report) {
+    /** @param forced jason.typecheck = true: analisa mesmo sem nenhuma declaração de tipo */
+    private static Analysis analyse(MAS2JProject project, TypeCheckReport report, boolean forced) {
         // 1. declarações globais (bloco types do .mas2j)
         TypeTable global = globalTable(project, report);
 
@@ -208,7 +215,7 @@ public class StaticTypeCheck {
         }
 
         Map<String, TypeTable> merged = new LinkedHashMap<>();
-        if (!anyDecl)
+        if (!anyDecl && !forced)
             return new Analysis(global, merged, false);
 
         // 3. verifica cada agente com a junção: .mas2j + sobrescritas do .asl
@@ -241,6 +248,12 @@ public class StaticTypeCheck {
      */
     static void internalError(RuntimeException e) {
         logger.log(Level.WARNING, "erro interno no verificador de tipos; a verificação foi ignorada neste ponto", e);
+    }
+
+    /** jason.typecheck = true: verifica mesmo sem nenhuma declaração de tipo */
+    private static boolean isForced() {
+        String v = property(PROP_ENABLED);
+        return v != null && "true".equalsIgnoreCase(v.trim());
     }
 
     private static boolean stopOnFail() {
